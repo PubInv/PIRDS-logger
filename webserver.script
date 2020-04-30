@@ -1,0 +1,82 @@
+#! /bin/bash
+
+#####################
+# bash based cig script to generate json data for viewing
+#
+# Written by Geoff Mulligan @2020
+#####################
+
+
+if [[ $REQUEST_URI == / ]] ;then
+    echo -e "Content-type: text/html\n\n"
+    ls 0Logfile.* | sed 's/0Logfile.//' | while read line ;do
+	echo "$line -- <a href=/$line>raw</a> / <a href=/$line/json>json</a> / <a href=/breath_plot?i=$line>Breath Plot</a><br>"
+    done
+    exit
+fi
+
+uri=${REQUEST_URI%\?*}
+uri=${uri#*/}
+ipaddr=${uri%/*}
+json=${uri##*/}
+
+if [[ $json != json && $json != $ipaddr ]] ;then
+    echo -e "Content-type: text/plain\n\nBad Request"
+fi
+
+if test -s 0Logfile.$ipaddr ;then
+:
+else
+    echo -e "Content-type: text/plain\n\nNo such record"
+    exit
+fi
+
+if [[ $json == json ]] ;then
+    echo -e "Content-type: application/json\n"
+else
+    echo -e "Content-type: text/plain\n"
+fi
+
+nlines=$(cat 0Logfile.$ipaddr | wc -l)
+
+if [[ $QUERY_STRING ]] ;then
+    if [[ $QUERY_STRING =~ "n=" ]] ;then
+	num=${QUERY_STRING#*n=}
+	if [[ $json == json ]] ;then
+	    [[ $num -gt 1 && $nlines -gt 1 ]] && echo "["
+	    IFS=:
+	    first=1
+	    tail -n $num 0Logfile.$ipaddr | while read t a b c d e ;do
+		[[ $first ]] || echo ","
+		first=""
+		echo -n "{ \"event\": \"M\", \"type\": \"$a\", \"loc\": \"$b\", \"num\": $c, \"ms\": $d, \"val\": $e }"
+	    done
+	    echo ""
+	    [[ $num -gt 1 && $nlines -gt 1 ]] && echo "]"
+	else
+	    tail -n $num 0Logfile.$ipaddr | cut -d: -f2-
+	fi
+    else
+	echo bad query
+    fi
+else
+    if [[ $json == json ]] ;then
+	[[ $nlines -gt 1 ]] && echo "["
+	IFS=:
+	first=1
+	cat 0Logfile.$ipaddr | while read t a b c d e ;do
+	    [[ $first ]] || echo ","
+	    first=""
+	    echo -n "{ \"event\": \"M\", \"type\": \"$a\", \"loc\": \"$b\", \"num\": $c, \"ms\": $d, \"val\": $e }"
+	done
+	echo ""
+	[[ $nlines -gt 1 ]] && echo "]"
+    else
+	cat 0Logfile.$ipaddr | cut -d: -f2-
+    fi
+fi
+exit
+
+printenv
+echo ----
+set
