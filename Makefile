@@ -1,7 +1,7 @@
-all: server webserver
+all: pirds_logger pirds_webcgi
 
-server: server.c
-	gcc -o server server.c
+pirds_logger: pirds_logger.c
+	gcc -o pirds_logger pirds_logger.c
 
-webserver: webserver.c
-	gcc -o webserver webserver.c
+pirds_webcgi: pirds_webcgi.c
+	gcc -o pirds_webcgi pirds_webcgi.c
