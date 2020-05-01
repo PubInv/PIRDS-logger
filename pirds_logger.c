@@ -92,19 +92,21 @@ FILE *gFOUTPUT;
 int main(int argc, char* argv[]) {
   uint8_t mode = UDP;
 
-  gFOUTPUT = stderr;
-
   int opt;
   while ((opt = getopt(argc, argv, "Dt")) != -1) {
     switch (opt) {
-    case 'D': gDEBUG++; gFOUTPUT = stdout; break;
+    case 'D': gDEBUG++; break;
     case 't': mode = TCP; break;
-    default: fprintf(stderr, "Usage: %s [-D] [-t] [port]\n", argv[0]);
+    default: printf("Usage: %s [-D] [-t] [port]\n", argv[0]);
       exit(1);
     }
   }
 
-  char *port = "6111";
+  gFOUTPUT = stderr;
+  if (gDEBUG > 1)
+    gFOUTPUT = stdout; 
+
+ char *port = "6111";
   if (mode == TCP)
     port = "6110";
 
@@ -112,9 +114,10 @@ int main(int argc, char* argv[]) {
     port = argv[optind];
   }
 
-  fprintf(gFOUTPUT, "%s Server started %son port %s%s\n",
-	  mode == TCP ? "TCP":"UDP",
-	  "\033[92m", port, "\033[0m");
+  if (gDEBUG)
+    fprintf(gFOUTPUT, "%s Server started %son port %s%s\n",
+	    mode == TCP ? "TCP":"UDP",
+	    "\033[92m", port, "\033[0m");
 
   // getaddrinfo for host
   struct addrinfo hints, *res;
@@ -158,9 +161,11 @@ int main(int argc, char* argv[]) {
 
 void
 send_params(char *peer, char *addr) {
+#if 0
   printf("HTTP/1.1 200 OK\n\n");
   printf("PARAM_WAIT: 300\n");
   fflush(stdout);
+#endif
 }
 
 void
@@ -291,14 +296,16 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
   }
 
   if (message_types[x].type == '\0') {
-    fprintf(gFOUTPUT, "  Invalid Message\n");
+    if (gDEBUG)
+      fprintf(gFOUTPUT, "  Invalid Message\n");
     return 0;
   }
 
   int8_t rvalue = 0;
   switch(message_types[x].type) {
   case '{':
-    print_json(buffer);
+    if (gDEBUG)
+      print_json(buffer);
     log_json(peer, buffer);
     if (clientaddr)
       sendto(fd, "OK\n", 3, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
@@ -306,7 +313,8 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
       write(fd, "OK\n", 3);
     break;
   case '!':
-    fprintf(gFOUTPUT, "  Emergency Message\n");
+    if (gDEBUG)
+      fprintf(gFOUTPUT, "  Emergency Message\n");
     if (clientaddr)
       sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
     else
@@ -314,7 +322,8 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     rvalue = 1;
     break;
   case 'A':
-    fprintf(gFOUTPUT, "  Alarm Message\n");
+    if (gDEBUG)
+      fprintf(gFOUTPUT, "  Alarm Message\n");
     if (clientaddr)
       sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
     else
@@ -322,7 +331,8 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     rvalue = 1;
     break;
   case 'B':
-    fprintf(gFOUTPUT, "  Battery Message\n");
+    if (gDEBUG)
+      fprintf(gFOUTPUT, "  Battery Message\n");
     if (clientaddr)
       sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
     else
@@ -330,7 +340,8 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     rvalue = 1;
     break;
   case 'C':
-    fprintf(gFOUTPUT, "  Control Message\n");
+    if (gDEBUG)
+      fprintf(gFOUTPUT, "  Control Message\n");
     if (clientaddr)
       sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
     else
@@ -338,7 +349,8 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     rvalue = 1;
     break;
   case 'E':
-    fprintf(gFOUTPUT, "  Event Message\n");
+    if (gDEBUG)
+      fprintf(gFOUTPUT, "  Event Message\n");
     if (clientaddr)
       sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
     else
@@ -346,7 +358,8 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     rvalue = 1;
     break;
   case 'F':
-    fprintf(gFOUTPUT, "  Failure Message\n");
+    if (gDEBUG)
+      fprintf(gFOUTPUT, "  Failure Message\n");
     if (clientaddr)
       sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
     else
@@ -355,7 +368,8 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     break;
   case 'L':
     log_measurement_bytecode(peer, buffer, true);
-    print_measurement_bytecode(buffer, true);
+    if (gDEBUG)
+      print_measurement_bytecode(buffer, true);
     if (clientaddr)
       sendto(fd, "OK\n", 3, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
     else
@@ -363,14 +377,16 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     break;
   case 'M':
     log_measurement_bytecode(peer, buffer, false);
-    print_measurement_bytecode(buffer, false);
+    if (gDEBUG)
+      print_measurement_bytecode(buffer, false);
     if (clientaddr)
       sendto(fd, "OK\n", 3, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
     else
       write(fd, "OK\n", 3);
     break;
   case 'P':
-    fprintf(gFOUTPUT, "  Param request\n");
+    if (gDEBUG)
+      fprintf(gFOUTPUT, "  Param request\n");
     if (clientaddr)
       sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
     else
@@ -378,7 +394,8 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     rvalue = 1;
     break;
   case 'S':
-    fprintf(gFOUTPUT, "  aSsertion Message\n");
+    if (gDEBUG)
+      fprintf(gFOUTPUT, "  aSsertion Message\n");
     if (clientaddr)
       sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
     else
@@ -386,7 +403,8 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     rvalue = 1;
     break;
   default:
-    fprintf(gFOUTPUT, "  Unknown %c Message\n", message_types[x].type);
+    if (gDEBUG)
+      fprintf(gFOUTPUT, "  Unknown %c Message\n", message_types[x].type);
     if (clientaddr)
       sendto(fd, "UNK\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
     else
@@ -405,12 +423,15 @@ void handle_udp_connx(int listenfd) {
   // MSG_WAITALL or 0????
   int len = recvfrom(listenfd, buffer, BSIZE-1, MSG_WAITALL, &clientaddr, &addrlen);
 
-  time_t now = time(NULL);
-  struct tm *tm = localtime(&now);
-  fprintf(gFOUTPUT, "%d%02d%02d %02d:%02d:%02d ", tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
+  if (gDEBUG) {
+    time_t now = time(NULL);
+    struct tm *tm = localtime(&now);
+    fprintf(gFOUTPUT, "%d%02d%02d %02d:%02d:%02d ", tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
+  }
 
   if (len == -1) {
-    fprintf(gFOUTPUT, "recvfrom error\n");
+    if (gDEBUG)
+      fprintf(gFOUTPUT, "recvfrom error\n");
     return;
   }
   buffer[len] = '\0';
@@ -418,9 +439,10 @@ void handle_udp_connx(int listenfd) {
   char peer[INET6_ADDRSTRLEN];
   inet_ntop(AF_INET, &clientaddr.sin_addr, peer, sizeof peer);
 
-  fprintf(gFOUTPUT, "(%s) ", peer);
-  // message received
-  fprintf(gFOUTPUT, "\x1b[32m + [%d]\x1b[0m\n", len);
+  if (gDEBUG) {
+    fprintf(gFOUTPUT, "(%s) ", peer);
+    fprintf(gFOUTPUT, "\x1b[32m + [%d]\x1b[0m\n", len);
+  }
 
   handle_message(buffer, listenfd, &clientaddr, peer);
 }
@@ -444,12 +466,12 @@ void handle_tcp_connx(int listenfd) {
     socklen_t addrlen = sizeof clientaddr;
     int clientfd = accept (listenfd, (struct sockaddr *) &clientaddr, &addrlen);
 
-    if (gDEBUG > 1)
+    if (gDEBUG > 2)
       fprintf(gFOUTPUT, "accept (%d)\n", clientfd);
 
     if (clientfd < 0) {
-      fprintf(gFOUTPUT, "accept error\n");
-
+      if (gDEBUG)
+	fprintf(gFOUTPUT, "accept error\n");
     } else {
       if (fork() == 0) { // the child
 	if (prctl(PR_SET_PDEATHSIG, SIGTERM) == -1) {
@@ -464,9 +486,11 @@ void handle_tcp_connx(int listenfd) {
 
 	time_t now = time(NULL);
 	struct tm *tm = localtime(&now);
-	fprintf(gFOUTPUT, "%d%02d%02d %02d:%02d:%02d ", tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
-	fprintf(gFOUTPUT, "(%s) Connected %d\n", peer, clientfd);
-	fflush(gFOUTPUT);
+	if (gDEBUG) {
+	  fprintf(gFOUTPUT, "%d%02d%02d %02d:%02d:%02d ", tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
+	  fprintf(gFOUTPUT, "(%s) Connected %d\n", peer, clientfd);
+	  fflush(gFOUTPUT);
+	}
 
 	while(1) {
 	  int rcvd;
@@ -481,18 +505,23 @@ void handle_tcp_connx(int listenfd) {
 	  if (a < 0) {
 	    now = time(NULL);
 	    tm = localtime(&now);
-	    fprintf(gFOUTPUT, "%d%02d%02d %02d:%02d:%02d ",
-		    tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
-	    fprintf(gFOUTPUT, "(%s) select error\n", peer);
-	    fflush(gFOUTPUT);
+	    if (gDEBUG) {
+	      fprintf(gFOUTPUT, "%d%02d%02d %02d:%02d:%02d ",
+		      tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
+	      fprintf(gFOUTPUT, "(%s) select error\n", peer);
+	      fflush(gFOUTPUT);
+	    }
 	    break;
 	  }
 	  if (a == 0) {
 	    now = time(NULL);
 	    tm = localtime(&now);
-	    fprintf(gFOUTPUT, "%d%02d%02d %02d:%02d:%02d ",
-		    tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
-	    fprintf(gFOUTPUT, "(%s) timeout\n", peer);
+	    if (gDEBUG) {
+	      fprintf(gFOUTPUT, "%d%02d%02d %02d:%02d:%02d ",
+		      tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
+	      fprintf(gFOUTPUT, "(%s) timeout\n", peer);
+	      fflush(gFOUTPUT);
+	    }
 	    break;
 	  }
 	  if (FD_ISSET(clientfd, &fds))
@@ -505,23 +534,28 @@ void handle_tcp_connx(int listenfd) {
 
 	  now = time(NULL);
 	  tm = localtime(&now);
-	  fprintf(gFOUTPUT, "%d%02d%02d %02d:%02d:%02d ",
-		  tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
-	  fprintf(gFOUTPUT, "(%s) ", peer);
+	  if (gDEBUG) {
+	    fprintf(gFOUTPUT, "%d%02d%02d %02d:%02d:%02d ",
+		    tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
+	    fprintf(gFOUTPUT, "(%s) ", peer);
+	  }
 
-	  if (gDEBUG)
-	    fprintf(stderr, "[%d] ", getpid());
+	  if (gDEBUG > 2)
+	    fprintf(gFOUTPUT, "[%d] ", getpid());
 	  
 	  if (rcvd < 0) {    // receive error
-	    fprintf(gFOUTPUT, "  read/recv error\n");
+	    if (gDEBUG)
+	      fprintf(gFOUTPUT, "  read/recv error\n");
 	    break;
 	  } else if (rcvd == 0) {    // receive socket closed
-	    fprintf(gFOUTPUT, " Client disconnected\n");
+	    if (gDEBUG)
+	      fprintf(gFOUTPUT, " Client disconnected\n");
 	    break;
 	  }
 
 	  // message received     
-	  fprintf(gFOUTPUT, "\x1b[32m + [%d]\x1b[0m\n", rcvd);
+	  if (gDEBUG)
+	    fprintf(gFOUTPUT, "\x1b[32m + [%d]\x1b[0m\n", rcvd);
 
 	  handle_message(buffer, clientfd, NULL, peer);
 	}
