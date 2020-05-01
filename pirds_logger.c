@@ -12,26 +12,19 @@
  Written by Geoff Mulligan @2020
 ***************************************/ 
 
-#define VERSION 1.6
+#define VERSION 1.7
 
 #define _GNU_SOURCE
 #include <stdio.h>
-#include <stdarg.h>
 #include <string.h>
-#include <dirent.h>
 #include <unistd.h>
 #include <time.h>
-#include <ctype.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <signal.h>
-#include <errno.h>
-#include <inttypes.h>
-#include <sys/mman.h>
 #include <sys/prctl.h> // prctl(), PR_SET_PDEATHSIG
-#include <sys/mman.h>
-//#include "main.h"
+#include <stdbool.h>
 
 // Message Types
 struct {
@@ -72,7 +65,7 @@ struct {
 #define UDP 0
 #define TCP 1
 
-int gDEBUG = 0;
+uint8_t gDEBUG = 0;
 
 #define USESELECT
 #ifdef USESELECT
@@ -80,9 +73,9 @@ int gDEBUG = 0;
 #endif
 
 struct measurement_t {
-  uint8_t M;
-  uint8_t type;
-  uint8_t loc;
+  char M;
+  char type;
+  char loc;
   int8_t num;
   uint32_t ms;
   int32_t data;
@@ -97,9 +90,11 @@ void handle_tcp_connx(int listenfd);
 FILE *gFOUTPUT;
 
 int main(int argc, char* argv[]) {
-  int mode = UDP;
-  int opt;
+  uint8_t mode = UDP;
+
   gFOUTPUT = stderr;
+
+  int opt;
   while ((opt = getopt(argc, argv, "Dt")) != -1) {
     switch (opt) {
     case 'D': gDEBUG++; gFOUTPUT = stdout; break;
@@ -142,7 +137,7 @@ int main(int argc, char* argv[]) {
     listenfd = socket (p->ai_family, p->ai_socktype, 0);
     if (listenfd == -1) continue;
     int option = 1;
-    setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
+    setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof option);
     if (bind(listenfd, p->ai_addr, p->ai_addrlen) == 0) break;
   }
 
@@ -169,18 +164,18 @@ send_params(char *peer, char *addr) {
 }
 
 void
-log_measurement_bytecode(char *peer, void *buff, int limit) {
+log_measurement_bytecode(char *peer, void *buff, bool limit) {
   struct __attribute__((__packed__)) measurement_t *measurement = (struct measurement_t *) buff;
 
   // xxx need file locking
   char fname[30];
   strcpy(fname, "0Logfile.");
-  strcpy(fname+9, peer);
+  strcpy(fname + 9, peer);
   
   FILE *fp = fopen(fname, "a");
   if (!fp) return;
 
-  if (limit) fprintf(fp, "-");
+  if (limit) fprintf(fp, "-"); // make timestamp negative if limit message
   fprintf(fp, "%lu:%c:%c:%u:%u:%d\n", time(NULL), measurement->type, measurement->loc,
 	  measurement->num, ntohl(measurement->ms), ntohl(measurement->data));
   fclose(fp);
@@ -210,7 +205,7 @@ log_json(char *peer, void *buff) {
 }
 
 void
-print_measurement_bytecode(void *buff, int limit) {
+print_measurement_bytecode(void *buff, bool limit) {
   struct __attribute__((__packed__)) measurement_t *measurement = (struct measurement_t *) buff;
 
   switch (measurement->type) {
@@ -289,7 +284,7 @@ void zombie_hunter(int sig)
 
 int
 handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer) {
-  int x = 0;
+  uint8_t x = 0;
   while (message_types[x].type != '\0') {
     if (buffer[0] == message_types[x].type) break;
     x++;
@@ -300,7 +295,7 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     return 0;
   }
 
-  int rvalue = 0;
+  int8_t rvalue = 0;
   switch(message_types[x].type) {
   case '{':
     print_json(buffer);
@@ -359,16 +354,16 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     rvalue = 1;
     break;
   case 'L':
-    log_measurement_bytecode(peer, buffer, 1);
-    print_measurement_bytecode(buffer, 1);
+    log_measurement_bytecode(peer, buffer, true);
+    print_measurement_bytecode(buffer, true);
     if (clientaddr)
       sendto(fd, "OK\n", 3, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
     else
       write(fd, "OK\n", 3);
     break;
   case 'M':
-    log_measurement_bytecode(peer, buffer, 0);
-    print_measurement_bytecode(buffer, 0);
+    log_measurement_bytecode(peer, buffer, false);
+    print_measurement_bytecode(buffer, false);
     if (clientaddr)
       sendto(fd, "OK\n", 3, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
     else
@@ -538,4 +533,3 @@ void handle_tcp_connx(int listenfd) {
     }
   }
 }
-
