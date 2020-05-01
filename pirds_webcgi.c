@@ -162,11 +162,11 @@ dump_data(char *ipaddr, int json) {
       v = strtok(NULL, ":");
       printf(" \"loc\": \"%s\",", v);
       v = strtok(NULL, ":");
-      printf(" \"num\": \"%s\",", v);
+      printf(" \"num\": %s,", v);
       v = strtok(NULL, ":");
-      printf(" \"ms\": \"%s\",", v);
+      printf(" \"ms\": %s,", v);
       v = strtok(NULL, ":");
-      printf(" \"val\": \"%s\" }", v);
+      printf(" \"val\": %s }", v);
     }
   }
   if ((backlines == 0 || backlines > 1) && json)
