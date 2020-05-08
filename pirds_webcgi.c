@@ -76,13 +76,18 @@ void
 list_datasets() {
   DIR *dir = opendir(".");
   if (!dir) {
-    printf("Content-type: text/plain\n\nCan't open directory");
+    printf("Content-type: text/plain\n");
+    printf("Access-Control-Allow-Origin: *\n");
+    printf("\n");
+    printf("Can't open directory");
     return;
   }
 
   struct dirent *d = NULL;
   uint8_t found = 0;
-  printf("Content-type: text/html\n\n");
+  printf("Content-type: text/html\n");
+  printf("Access-Control-Allow-Origin: *\n");
+  printf("\n");
   
   while (d = readdir(dir)) {
     if (strchr(d->d_name, '~')) continue;
@@ -118,10 +123,12 @@ void find_back_lines(FILE *fp, int count) {
 
 void
 dump_data(char *ipaddr, int json) {
-  if (json)
-    printf("Content-type: application/json\n\n");
+  if (json) 
+    printf("Content-type: application/json\n");
   else
-    printf("Content-type: text/plain\n\n");
+    printf("Content-type: text/plain\n");
+  printf("Access-Control-Allow-Origin: *\n");
+  printf("\n");
 
   char *fname = NULL;
   asprintf(&fname, "0Logfile.%s", ipaddr);
@@ -179,7 +186,10 @@ int main() {
 
   char *uri = get_envvar("REQUEST_URI");
   if (uri == NULL) {
-    printf("Content-type: text/plain\n\nBad Request");
+    printf("Content-type: text/plain\n");
+    printf("Access-Control-Allow-Origin: *\n");
+    printf("\n");
+    printf("Bad Request");
     exit(1);
   }
 
@@ -203,8 +213,11 @@ int main() {
     } else {
       dump_data(ipaddr, 0);
     }
-  } else
-    printf("Content-type: text/plain\n\nBad Request\n");
+  } else {
+    printf("Content-type: text/plain\n");
+    printf("Access-Control-Allow-Origin: *\n");
+    printf("\n");
+    printf("Bad Request");
+  }
   exit(0);
 }
-
