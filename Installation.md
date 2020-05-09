@@ -45,13 +45,13 @@ Add a script alias lines for example:
  `ScriptAliasMatch "/*" "/var/www/ventmon/index.cgi"`
  
  and
-''' 
+```
          <Directory /var/www/ventmon>
           AllowOverride None
           Options +ExecCGI -MultiViews
           AddHandler cgi-script .cgi
         </Directory>
-'''
+```
 
 
 
