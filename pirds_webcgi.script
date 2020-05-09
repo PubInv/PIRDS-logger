@@ -8,7 +8,9 @@
 
 
 if [[ $REQUEST_URI == / ]] ;then
-    echo -e "Content-type: text/html\n\n"
+    echo "Content-type: text/html"
+    echo "Access-Control-Allow-Origin: *"
+    echo ""
     ls 0Logfile.* | sed 's/0Logfile.//' | while read line ;do
 	echo "$line -- <a href=/$line>raw</a> / <a href=/$line/json>json</a> / <a href=/breath_plot?i=$line>Breath Plot</a><br>"
     done
@@ -21,21 +23,29 @@ ipaddr=${uri%/*}
 json=${uri##*/}
 
 if [[ $json != json && $json != $ipaddr ]] ;then
-    echo -e "Content-type: text/plain\n\nBad Request"
+    echo "Content-type: text/plain"
+    echo "Access-Control-Allow-Origin: *"
+    echo ""
+    echo "Bad Request"
 fi
 
 if test -s 0Logfile.$ipaddr ;then
 :
 else
-    echo -e "Content-type: text/plain\n\nNo such record"
+    echo "Content-type: text/plain"
+    echo "Access-Control-Allow-Origin: *"
+    echo ""
+    echo "No such record"
     exit
 fi
 
 if [[ $json == json ]] ;then
-    echo -e "Content-type: application/json\n"
+    echo "Content-type: application/json"
 else
-    echo -e "Content-type: text/plain\n"
+    echo "Content-type: text/plain"
 fi
+echo "Access-Control-Allow-Origin: *"
+echo ""
 
 nlines=$(cat 0Logfile.$ipaddr | wc -l)
 
