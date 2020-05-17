@@ -82,7 +82,7 @@ struct measurement_t {
 };
 
 #define BSIZE 65*1024
-uint8_t buffer[BSIZE];
+uint8_t buffer[BSIZE] = "";
 
 void handle_udp_connx(int listenfd);
 void handle_tcp_connx(int listenfd);
@@ -173,7 +173,7 @@ log_measurement_bytecode(char *peer, void *buff, bool limit) {
   struct __attribute__((__packed__)) measurement_t *measurement = (struct measurement_t *) buff;
 
   // xxx need file locking
-  char fname[30];
+  char fname[30] = "";
   strcpy(fname, "0Logfile.");
   strcpy(fname + 9, peer);
   
@@ -189,7 +189,7 @@ log_measurement_bytecode(char *peer, void *buff, bool limit) {
 void
 log_json(char *peer, void *buff) {
   // xxx need file locking
-  char fname[30];
+  char fname[30] = "";
   strcpy(fname, "0Logfile.");
   strcpy(fname+9, peer);
   
@@ -436,7 +436,7 @@ void handle_udp_connx(int listenfd) {
   }
   buffer[len] = '\0';
   
-  char peer[INET6_ADDRSTRLEN];
+  char peer[INET6_ADDRSTRLEN] = "";
   inet_ntop(AF_INET, &clientaddr.sin_addr, peer, sizeof peer);
 
   if (gDEBUG) {
@@ -481,7 +481,7 @@ void handle_tcp_connx(int listenfd) {
 #if 0
 	if (getppid() != ppid) exit(1);
 #endif
-	char peer[INET6_ADDRSTRLEN];
+	char peer[INET6_ADDRSTRLEN] = "";
 	inet_ntop(AF_INET, &clientaddr.sin_addr, peer, sizeof peer);
 
 	time_t now = time(NULL);
