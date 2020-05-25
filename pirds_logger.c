@@ -1,16 +1,40 @@
 /************************************
+MIT License
+
+Copyright (c) 2020 Public Invention
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
  This is a datalogger for the VentMon project
- It can be started to listen for tcp connections or 
+ It can be started to listen for tcp connections or
  ucp packets. The packets must be formatted in the PIRDS
  format. The data is logged to simple unix file in the
  current directory based on the ip address of the sender.
- These means that there will be a collision if there are 
+ These means that there will be a collision if there are
  multiple senders behind a single nat.
  I'll fix this later.
          Geoff
 
  Written by Geoff Mulligan @2020
-***************************************/ 
+ Modified by Robert L. Read May 2020, to use PIRDS library
+
+***************************************/
 
 #define VERSION 1.7
 
@@ -23,8 +47,11 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <signal.h>
+#if __linux__
 #include <sys/prctl.h> // prctl(), PR_SET_PDEATHSIG
+#endif
 #include <stdbool.h>
+#include "PIRDS-1-1.h"
 
 // Message Types
 struct {
@@ -72,17 +99,8 @@ uint8_t gDEBUG = 0;
 #define DATA_TIMEOUT 60 // for TCP connections
 #endif
 
-struct measurement_t {
-  char M;
-  char type;
-  char loc;
-  int8_t num;
-  uint32_t ms;
-  int32_t data;
-};
-
 #define BSIZE 65*1024
-uint8_t buffer[BSIZE] = "";
+uint8_t buffer[BSIZE];
 
 void handle_udp_connx(int listenfd);
 void handle_tcp_connx(int listenfd);
@@ -104,7 +122,7 @@ int main(int argc, char* argv[]) {
 
   gFOUTPUT = stderr;
   if (gDEBUG > 1)
-    gFOUTPUT = stdout; 
+    gFOUTPUT = stdout;
 
  char *port = "6111";
   if (mode == TCP)
@@ -150,6 +168,8 @@ int main(int argc, char* argv[]) {
     perror ("socket() or bind()");
     exit(1);
   }
+  if (gDEBUG)
+    fprintf(gFOUTPUT, "LOOP!\n");
 
   while (1) {
     if (mode == TCP)
@@ -168,39 +188,58 @@ send_params(char *peer, char *addr) {
 #endif
 }
 
+// For debugging...
+void render_measurement(Measurement* m) {
+  fprintf(stderr,"Measurement:\n" );
+  fprintf(stderr,"Event %c\n", m->event);
+  fprintf(stderr,"type %c\n", m->type);
+  fprintf(stderr,"loc %c\n", m->loc);
+  fprintf(stderr,"num %u\n", m->num);
+  fprintf(stderr,"ms %u\n", m->ms);
+  fprintf(stderr,"val %d\n", m->val);
+}
+
+/*
 void
 log_measurement_bytecode(char *peer, void *buff, bool limit) {
   struct __attribute__((__packed__)) measurement_t *measurement = (struct measurement_t *) buff;
+*/
+void
+log_measurement_bytecode(char *peer, void *buff, bool limit) {
+
+  Measurement measurement = get_measurement_from_buffer(buff,13);
 
   // xxx need file locking
-  char fname[30] = "";
+  char fname[30];
   strcpy(fname, "0Logfile.");
   strcpy(fname + 9, peer);
-  
+
   FILE *fp = fopen(fname, "a");
   if (!fp) return;
 
   if (limit) fprintf(fp, "-"); // make timestamp negative if limit message
-  fprintf(fp, "%lu:%c:%c:%u:%u:%d\n", time(NULL), measurement->type, measurement->loc,
-	  measurement->num, ntohl(measurement->ms), ntohl(measurement->data));
+  //  fprintf(fp, "%lu:%c:%c:%u:%u:%d\n", time(NULL), measurement->type, measurement->loc,
+  //	  measurement->num, measurement->ms, measurement->val);
+    fprintf(fp, "%lu:%c:%c:%u:%u:%d\n", time(NULL), measurement.type, measurement.loc,
+  	  measurement.num, measurement.ms, measurement.val);
   fclose(fp);
 }
 
 void
 log_json(char *peer, void *buff) {
   // xxx need file locking
-  char fname[30] = "";
+  char fname[30];
   strcpy(fname, "0Logfile.");
   strcpy(fname+9, peer);
-  
+
   FILE *fp = fopen(fname, "a");
   if (!fp) return;
 
   char *ptr = strchr((char *)buff, '\n');
   if (ptr) *ptr = '\0';
-  if (ptr = strchr((char*)buff, '\r'))
+  if ((ptr = strchr((char*)buff, '\r')))
     *ptr = '\0';
-      
+
   if (((char *)buff)[0] == '[') {
     fprintf(fp, "[ {\"TimeStamp\": %lu}, %s\n", time(NULL), (char *)buff+1);
   } else {
@@ -211,58 +250,63 @@ log_json(char *peer, void *buff) {
 
 void
 print_measurement_bytecode(void *buff, bool limit) {
-  struct __attribute__((__packed__)) measurement_t *measurement = (struct measurement_t *) buff;
 
-  switch (measurement->type) {
+  Measurement measurement = get_measurement_from_buffer(buff,13);
+
+  //  render_measurement(&measurement);
+  int v = (int) measurement.val;
+  float fv = (float) v;
+
+  switch (measurement.type) {
   case 'T':
-    fprintf(gFOUTPUT, "  Temp%s %c%c (%u): %f C\n", limit ? "LIMIT" : "",
-	   measurement->loc, measurement->num, ntohl(measurement->ms),
-	   (float)(int)ntohl(measurement->data)/100.0);
+    fprintf(gFOUTPUT, "  Temp%s %c%d (%u): %f C\n", limit ? "LIMIT" : "",
+	   measurement.loc, measurement.num, measurement.ms,
+            fv /100.0);
     break;
   case 'P':
-    fprintf(gFOUTPUT, "  Pressure%s %c%c (%u): %f cm\n", limit ? "LIMIT" : "",
-	   measurement->loc, measurement->num, ntohl(measurement->ms),
-	   (float)(int)ntohl(measurement->data)/100.0);
+    fprintf(gFOUTPUT, "  Pressure%s %c%d (%u): %f cm\n", limit ? "LIMIT" : "",
+	   measurement.loc, measurement.num, measurement.ms,
+            fv /100.0);
     break;
   case 'D':
-    fprintf(gFOUTPUT, "  DifferentialPressure%s %c%c (%u): %f cm\n", limit ? "LIMIT" : "",
-	   measurement->loc, measurement->num, ntohl(measurement->ms),
-	   (float)(int)ntohl(measurement->data)/100.0);
+    fprintf(gFOUTPUT, "  DifferentialPressure%s %c%d (%u): %f cm\n", limit ? "LIMIT" : "",
+	   measurement.loc, measurement.num, measurement.ms,
+            fv /10.0);
     break;
   case 'F':
-    fprintf(gFOUTPUT, "  Flow%s %c%c (%u): %f l\n", limit ? "LIMIT" : "",
-	   measurement->loc, measurement->num, ntohl(measurement->ms),
-	   (float)(int)ntohl(measurement->data)/100.0);
+    fprintf(gFOUTPUT, "  Flow%s %c%d (%u): %f l\n", limit ? "LIMIT" : "",
+	   measurement.loc, measurement.num, measurement.ms,
+            fv /100.0);
     break;
   case 'O':
-    fprintf(gFOUTPUT, "  FractionalO2%s %c%c (%u): %f%%\n", limit ? "LIMIT" : "",
-	   measurement->loc, measurement->num, ntohl(measurement->ms),
-	   (float)(int)ntohl(measurement->data)/100.0);
+    fprintf(gFOUTPUT, "  FractionalO2%s %c%d (%u): %f%%\n", limit ? "LIMIT" : "",
+	   measurement.loc, measurement.num, measurement.ms,
+            fv /100.0);
     break;
   case 'H':
-    fprintf(gFOUTPUT, "  Humidity%s %c%c (%u): %f%%\n", limit ? "LIMIT" : "",
-	   measurement->loc, measurement->num, ntohl(measurement->ms),
-	   (float)(int)ntohl(measurement->data)/100.0);
+    fprintf(gFOUTPUT, "  Humidity%s %c%d (%u): %f%%\n", limit ? "LIMIT" : "",
+	   measurement.loc, measurement.num, measurement.ms,
+	   fv/100.0);
     break;
   case 'V':
-    fprintf(gFOUTPUT, "  Volume%s %c%c (%u): %d ml\n", limit ? "LIMIT" : "",
-	   measurement->loc, measurement->num, ntohl(measurement->ms),
-	   (int)ntohl(measurement->data));
+    fprintf(gFOUTPUT, "  Volume%s %c%d (%u): %d ml\n", limit ? "LIMIT" : "",
+	   measurement.loc, measurement.num, measurement.ms,
+	   v);
     break;
   case 'B':
-    fprintf(gFOUTPUT, "  Breaths%s %c%c (%u): %d\n", limit ? "LIMIT" : "",
-	   measurement->loc, measurement->num, ntohl(measurement->ms),
-	   (int)ntohl(measurement->data)/10);
+    fprintf(gFOUTPUT, "  Breaths%s %c%d (%u): %d\n", limit ? "LIMIT" : "",
+	   measurement.loc, measurement.num, measurement.ms,
+	   v/10);
     break;
   case 'G':
-    fprintf(gFOUTPUT, "  Gas%s %c%c (%u): %d\n", limit ? "LIMIT" : "",
-	   measurement->loc, measurement->num, ntohl(measurement->ms),
-	   (int)ntohl(measurement->data));
+    fprintf(gFOUTPUT, "  Gas%s %c%d (%u): %d\n", limit ? "LIMIT" : "",
+	   measurement.loc, measurement.num, measurement.ms,
+	   v);
     break;
   case 'A':
-    fprintf(gFOUTPUT, "  Altitude%s %c%c (%u): %d m\n", limit ? "LIMIT" : "",
-	   measurement->loc, measurement->num, ntohl(measurement->ms),
-	   (int)ntohl(measurement->data));
+    fprintf(gFOUTPUT, "  Altitude%s %c%d (%u): %d m\n", limit ? "LIMIT" : "",
+	   measurement.loc, measurement.num, measurement.ms,
+	   v);
     break;
   default: fprintf(gFOUTPUT, "Invalid measurement type\n");
   }
@@ -272,7 +316,7 @@ void
 print_json(void *buff) {
   char *ptr = strchr(buff, '\n');
   if (ptr) *ptr = '\0';
-  if (ptr = strchr(buff, '\r'))
+  if ((ptr = strchr(buff, '\r')))
     *ptr = '\0';
   fprintf(gFOUTPUT, "%s\n", (char *)buff);
 }
@@ -288,7 +332,7 @@ void zombie_hunter(int sig)
 #endif
 
 int
-handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer) {
+handle_message(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer) {
   uint8_t x = 0;
   while (message_types[x].type != '\0') {
     if (buffer[0] == message_types[x].type) break;
@@ -301,6 +345,13 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     return 0;
   }
 
+  int flags = 0;
+#if __linux__
+  flags = MSG_CONFIRM;
+#endif
+
+
+
   int8_t rvalue = 0;
   switch(message_types[x].type) {
   case '{':
@@ -308,7 +359,7 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
       print_json(buffer);
     log_json(peer, buffer);
     if (clientaddr)
-      sendto(fd, "OK\n", 3, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
+      sendto(fd, "OK\n", 3, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "OK\n", 3);
     break;
@@ -316,7 +367,7 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     if (gDEBUG)
       fprintf(gFOUTPUT, "  Emergency Message\n");
     if (clientaddr)
-      sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
+      sendto(fd, "NOP\n", 4, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "NOP\n", 4);
     rvalue = 1;
@@ -325,7 +376,7 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     if (gDEBUG)
       fprintf(gFOUTPUT, "  Alarm Message\n");
     if (clientaddr)
-      sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
+      sendto(fd, "NOP\n", 4, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "NOP\n", 4);
     rvalue = 1;
@@ -334,7 +385,7 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     if (gDEBUG)
       fprintf(gFOUTPUT, "  Battery Message\n");
     if (clientaddr)
-      sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
+      sendto(fd, "NOP\n", 4, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "NOP\n", 4);
     rvalue = 1;
@@ -343,7 +394,7 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     if (gDEBUG)
       fprintf(gFOUTPUT, "  Control Message\n");
     if (clientaddr)
-      sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
+      sendto(fd, "NOP\n", 4, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "NOP\n", 4);
     rvalue = 1;
@@ -352,7 +403,7 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     if (gDEBUG)
       fprintf(gFOUTPUT, "  Event Message\n");
     if (clientaddr)
-      sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
+      sendto(fd, "NOP\n", 4, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "NOP\n", 4);
     rvalue = 1;
@@ -361,7 +412,7 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     if (gDEBUG)
       fprintf(gFOUTPUT, "  Failure Message\n");
     if (clientaddr)
-      sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
+      sendto(fd, "NOP\n", 4, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "NOP\n", 4);
     rvalue = 1;
@@ -371,7 +422,7 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     if (gDEBUG)
       print_measurement_bytecode(buffer, true);
     if (clientaddr)
-      sendto(fd, "OK\n", 3, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
+      sendto(fd, "OK\n", 3, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "OK\n", 3);
     break;
@@ -380,7 +431,7 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     if (gDEBUG)
       print_measurement_bytecode(buffer, false);
     if (clientaddr)
-      sendto(fd, "OK\n", 3, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
+      sendto(fd, "OK\n", 3, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "OK\n", 3);
     break;
@@ -388,7 +439,7 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     if (gDEBUG)
       fprintf(gFOUTPUT, "  Param request\n");
     if (clientaddr)
-      sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
+      sendto(fd, "NOP\n", 4, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "NOP\n", 4);
     rvalue = 1;
@@ -397,7 +448,7 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     if (gDEBUG)
       fprintf(gFOUTPUT, "  aSsertion Message\n");
     if (clientaddr)
-      sendto(fd, "NOP\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
+      sendto(fd, "NOP\n", 4, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "NOP\n", 4);
     rvalue = 1;
@@ -406,7 +457,7 @@ handle_message(char *buffer, int fd, struct sockaddr_in *clientaddr, char *peer)
     if (gDEBUG)
       fprintf(gFOUTPUT, "  Unknown %c Message\n", message_types[x].type);
     if (clientaddr)
-      sendto(fd, "UNK\n", 4, MSG_CONFIRM, clientaddr, sizeof *clientaddr);
+      sendto(fd, "UNK\n", 4, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "UNK\n", 4);
     rvalue = 2;
@@ -421,7 +472,7 @@ void handle_udp_connx(int listenfd) {
   socklen_t addrlen = sizeof clientaddr;
 
   // MSG_WAITALL or 0????
-  int len = recvfrom(listenfd, buffer, BSIZE-1, MSG_WAITALL, &clientaddr, &addrlen);
+  int len = recvfrom(listenfd, buffer, BSIZE-1, MSG_WAITALL, (struct sockaddr *) &clientaddr, &addrlen);
 
   if (gDEBUG) {
     time_t now = time(NULL);
@@ -435,8 +486,8 @@ void handle_udp_connx(int listenfd) {
     return;
   }
   buffer[len] = '\0';
-  
-  char peer[INET6_ADDRSTRLEN] = "";
+
+  char peer[INET6_ADDRSTRLEN];
   inet_ntop(AF_INET, &clientaddr.sin_addr, peer, sizeof peer);
 
   if (gDEBUG) {
@@ -453,14 +504,14 @@ void handle_tcp_connx(int listenfd) {
     perror("listen() error");
     return;
   }
-    
+
   // Ignore SIGCHLD to avoid zombie threads
   signal(SIGCHLD,SIG_IGN);
   //  signal(SIGCHLD,zombie_hunter);
 
   // ACCEPT connections
   pid_t ppid = getpid();
-    
+
   while (1) {
     struct sockaddr_in clientaddr;
     socklen_t addrlen = sizeof clientaddr;
@@ -474,14 +525,17 @@ void handle_tcp_connx(int listenfd) {
 	fprintf(gFOUTPUT, "accept error\n");
     } else {
       if (fork() == 0) { // the child
+#if __linux__
 	if (prctl(PR_SET_PDEATHSIG, SIGTERM) == -1) {
 	  perror("prctl for child");
 	  exit(1);
 	}
+#endif
+
 #if 0
 	if (getppid() != ppid) exit(1);
 #endif
-	char peer[INET6_ADDRSTRLEN] = "";
+	char peer[INET6_ADDRSTRLEN];
 	inet_ntop(AF_INET, &clientaddr.sin_addr, peer, sizeof peer);
 
 	time_t now = time(NULL);
@@ -498,7 +552,7 @@ void handle_tcp_connx(int listenfd) {
 	  fd_set fds;
 	  FD_ZERO(&fds);
 	  FD_SET(clientfd, &fds);
-	  
+
 	  struct timeval tv = {DATA_TIMEOUT, 0};
 
 	  uint8_t a = select(clientfd+1, &fds, NULL, NULL, &tv);
@@ -542,7 +596,7 @@ void handle_tcp_connx(int listenfd) {
 
 	  if (gDEBUG > 2)
 	    fprintf(gFOUTPUT, "[%d] ", getpid());
-	  
+
 	  if (rcvd < 0) {    // receive error
 	    if (gDEBUG)
 	      fprintf(gFOUTPUT, "  read/recv error\n");
@@ -553,7 +607,7 @@ void handle_tcp_connx(int listenfd) {
 	    break;
 	  }
 
-	  // message received     
+	  // message received
 	  if (gDEBUG)
 	    fprintf(gFOUTPUT, "\x1b[32m + [%d]\x1b[0m\n", rcvd);
 
