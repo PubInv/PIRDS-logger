@@ -49,6 +49,7 @@ echo ""
 
 nlines=$(cat 0Logfile.$ipaddr | wc -l)
 
+# This is now obsolete...it doesn't support the full PIRDS standard  (such as E/M Event/Message types)
 if [[ $QUERY_STRING ]] ;then
     if [[ $QUERY_STRING =~ "n=" ]] ;then
 	num=${QUERY_STRING#*n=}

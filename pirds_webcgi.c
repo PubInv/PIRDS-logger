@@ -162,18 +162,59 @@ dump_data(char *ipaddr, int json) {
       if (!first)
 	printf(",\n");
       first = 0;
-      printf("{ \"event\": \"M\",");
+      //      printf("{ \"event\": \"M\",");
       char *v = strtok(line, ":"); // skip timestamp
       v = strtok(NULL, ":");
-      printf(" \"type\": \"%s\",", v);
-      v = strtok(NULL, ":");
-      printf(" \"loc\": \"%s\",", v);
-      v = strtok(NULL, ":");
-      printf(" \"num\": %s,", v);
-      v = strtok(NULL, ":");
-      printf(" \"ms\": %s,", v);
-      v = strtok(NULL, ":");
-      printf(" \"val\": %s }", v);
+      // This part is for back-compatibility;
+      // it should be removed when we have a chance
+      if ((0 == strcmp(v,"P")) ||
+          (0 == strcmp(v,"D")) ||
+          (0 == strcmp(v,"F")) ||
+          (0 == strcmp(v,"H")) ||
+          (0 == strcmp(v,"G")) ||
+          (0 == strcmp(v,"T")) ||
+          (0 == strcmp(v,"A"))
+          ) {
+        printf("{ \"event\": \"M\",");
+        //      v = strtok(NULL, ":");
+        printf(" \"type\": \"%s\",", v);
+        v = strtok(NULL, ":");
+        printf(" \"loc\": \"%s\",", v);
+        v = strtok(NULL, ":");
+        printf(" \"num\": %s,", v);
+        v = strtok(NULL, ":");
+        printf(" \"ms\": %s,", v);
+        v = strtok(NULL, ":");
+        printf(" \"val\": %s }", v);
+      } else if (0 == strcmp(v,"M")) {
+        printf("{ \"event\": \"%s\",",v);
+        v = strtok(NULL, ":");
+        printf(" \"type\": \"%s\",", v);
+        v = strtok(NULL, ":");
+        printf(" \"loc\": \"%s\",", v);
+        v = strtok(NULL, ":");
+        printf(" \"num\": %s,", v);
+        v = strtok(NULL, ":");
+        printf(" \"ms\": %s,", v);
+        v = strtok(NULL, ":");
+        printf(" \"val\": %s }", v);
+      } else if (0 == strcmp(v,"E")) {
+        // The only currently supported other format is "M"
+        v = strtok(NULL, ":");
+        if (0 == strcmp(v,"M")) {
+            printf("{ \"event\": \"%s\",","E");
+            printf(" \"type\": \"M\",");
+            v = strtok(NULL, ":");
+            printf(" \"ms\": %s,", v);
+            v = strtok(NULL, ":");
+            // Note: This string is already double quoted...
+            // this is not good strong typing,
+            // it should be improved.
+            printf(" \"buff\": %s }", v);
+        } else {
+          printf("");
+        }
+      }
     }
   }
   if ((backlines == 0 || backlines > 1) && json)

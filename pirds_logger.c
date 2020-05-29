@@ -220,8 +220,34 @@ log_measurement_bytecode(char *peer, void *buff, bool limit) {
   if (limit) fprintf(fp, "-"); // make timestamp negative if limit message
   //  fprintf(fp, "%lu:%c:%c:%u:%u:%d\n", time(NULL), measurement->type, measurement->loc,
   //	  measurement->num, measurement->ms, measurement->val);
-    fprintf(fp, "%lu:%c:%c:%u:%u:%d\n", time(NULL), measurement.type, measurement.loc,
+    fprintf(fp, "%lu:%c:%c:%c:%u:%u:%d\n", time(NULL),
+            measurement.event,
+            measurement.type, measurement.loc,
   	  measurement.num, measurement.ms, measurement.val);
+  fclose(fp);
+}
+
+void
+log_event_bytecode(char *peer, void *buff, bool limit) {
+
+  Message message = get_message_from_buffer(buff,263);
+
+  // xxx need file locking
+  char fname[30];
+  strcpy(fname, "0Logfile.");
+  strcpy(fname + 9, peer);
+
+  FILE *fp = fopen(fname, "a");
+  if (!fp) return;
+
+  // We're no longer doing this
+  //  if (limit) fprintf(fp, "-");
+  fprintf(fp, "%lu:%c:%c:%u:\"%s\"\n",
+          time(NULL),
+          message.event,
+          message.type,
+          message.ms,
+          message.buff);
   fclose(fp);
 }
 
@@ -247,12 +273,30 @@ log_json(char *peer, void *buff) {
   }
   fclose(fp);
 }
+void print_message(Message message,bool limit);
+
+void
+print_event_bytecode(void *buff, bool limit) {
+  char second_char = ((char *)buff)[1];
+  if (second_char == 'M') {
+    Message message = get_message_from_buffer(buff,263);
+    print_message(message,limit);
+  }
+}
+
+void print_message(Message message,bool limit) {
+  fprintf(gFOUTPUT, "  MESSAGE||%s||\n", message.buff);
+}
+
+void print_measurement(Measurement measurement,bool limit);
 
 void
 print_measurement_bytecode(void *buff, bool limit) {
-
   Measurement measurement = get_measurement_from_buffer(buff,13);
+  print_measurement(measurement,limit);
+}
 
+ void print_measurement(Measurement measurement,bool limit) {
   //  render_measurement(&measurement);
   int v = (int) measurement.val;
   float fv = (float) v;
@@ -332,7 +376,7 @@ void zombie_hunter(int sig)
 #endif
 
 int
-handle_message(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer) {
+handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer) {
   uint8_t x = 0;
   while (message_types[x].type != '\0') {
     if (buffer[0] == message_types[x].type) break;
@@ -349,8 +393,6 @@ handle_message(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *pe
 #if __linux__
   flags = MSG_CONFIRM;
 #endif
-
-
 
   int8_t rvalue = 0;
   switch(message_types[x].type) {
@@ -399,9 +441,11 @@ handle_message(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *pe
       write(fd, "NOP\n", 4);
     rvalue = 1;
     break;
+    /* The is an *E*vent */
   case 'E':
+    log_event_bytecode(peer, buffer, true);
     if (gDEBUG)
-      fprintf(gFOUTPUT, "  Event Message\n");
+      print_event_bytecode(buffer, true);
     if (clientaddr)
       sendto(fd, "NOP\n", 4, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
@@ -495,7 +539,7 @@ void handle_udp_connx(int listenfd) {
     fprintf(gFOUTPUT, "\x1b[32m + [%d]\x1b[0m\n", len);
   }
 
-  handle_message(buffer, listenfd, &clientaddr, peer);
+  handle_event(buffer, listenfd, &clientaddr, peer);
 }
 
 void handle_tcp_connx(int listenfd) {
@@ -611,7 +655,7 @@ void handle_tcp_connx(int listenfd) {
 	  if (gDEBUG)
 	    fprintf(gFOUTPUT, "\x1b[32m + [%d]\x1b[0m\n", rcvd);
 
-	  handle_message(buffer, clientfd, NULL, peer);
+	  handle_event(buffer, clientfd, NULL, peer);
 	}
 	//Closing SOCKET
 	fflush(gFOUTPUT);
