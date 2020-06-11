@@ -53,6 +53,9 @@ SOFTWARE.
 #include <stdbool.h>
 #include "PIRDS-1-1.h"
 
+
+#define SAVE_LOG_TO_FILE "SAVE_LOG_TO_FILE:"
+
 // Message Types
 struct {
   char type;
@@ -105,7 +108,22 @@ uint8_t buffer[BSIZE];
 void handle_udp_connx(int listenfd);
 void handle_tcp_connx(int listenfd);
 
+int
+handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer, bool mark_minute);
+
 FILE *gFOUTPUT;
+
+// We will keep a count of the number of minutes
+// since the UNIX epoch (seconds/60).
+// When this changes, we will set a mark for the
+// first child process to inject a "clock" event.
+unsigned long epoch_minute;
+
+// We need to associate the current "peer" string
+// with the current milliseconds in the stream
+// in order to be able to inject clockevents correctly.
+// One way to do this is to look backwards in the
+// current file, which will fail if we are just beginning.
 
 int main(int argc, char* argv[]) {
   uint8_t mode = UDP;
@@ -204,62 +222,161 @@ void
 log_measurement_bytecode(char *peer, void *buff, bool limit) {
   struct __attribute__((__packed__)) measurement_t *measurement = (struct measurement_t *) buff;
 */
-void
-log_measurement_bytecode(char *peer, void *buff, bool limit) {
 
-  Measurement measurement = get_measurement_from_buffer(buff,13);
-
+FILE* open_log_file(char *peer, void *buff) {
   // xxx need file locking
   char fname[30];
   strcpy(fname, "0Logfile.");
   strcpy(fname + 9, peer);
 
   FILE *fp = fopen(fname, "a");
-  if (!fp) return;
+  return fp;
+}
 
-  if (limit) fprintf(fp, "-"); // make timestamp negative if limit message
-  //  fprintf(fp, "%lu:%c:%c:%u:%u:%d\n", time(NULL), measurement->type, measurement->loc,
-  //	  measurement->num, measurement->ms, measurement->val);
-    fprintf(fp, "%lu:%c:%c:%c:%u:%u:%d\n", time(NULL),
+/**
+ * Copy content from one file to other file.
+ */
+int
+copy_file(char path_to_read_file[], char path_to_write_file[])
+{
+    char chr;
+    FILE *stream_for_write, *stream_for_read;
+
+    if ((stream_for_write = fopen(path_to_write_file, "w")) == NULL) {
+        fprintf(stderr, "%s: %s\n", "Impossible to create a file", path_to_write_file);
+        return -1;
+    }
+
+    if ((stream_for_read = fopen(path_to_read_file, "r")) == NULL) {
+        fprintf(stderr, "%s: %s\n", "Impossible to read a file", path_to_read_file);
+        return -1;
+    }
+
+    while (!feof(stream_for_read)) {
+      char chr = fgetc(stream_for_read);
+      fputc(chr, stream_for_write);
+    }
+
+    fclose(stream_for_write);
+    fclose(stream_for_read);
+    return 0;
+}
+
+void copy_log_file_to_name(char* peer,char* name) {
+
+  char fname[30];
+  int ret;
+  strcpy(fname, "0Logfile.");
+  strcpy(fname + 9, peer);
+
+  char cmd[256];
+
+  sprintf(cmd,"mv %s %s",fname,name);
+  system(cmd);
+  fprintf(gFOUTPUT,"old name %s, new name %s",fname,name);
+  /* ret =   rename(fname,name); */
+  /* if(ret == 0) { */
+  /*     fprintf(gFOUTPUT,"File renamed successfully"); */
+
+  /*  } else { */
+  /*     fprintf(gFOUTPUT, "Error: unable to rename the file"); */
+  /*  } */
+  //  copy_file(fname,name);
+}
+
+void mark_minute_into_stream(uint32_t cur_ms, int fd, struct sockaddr_in *clientaddr, char *peer) {
+    // Here whenever a new minute ticks over we output a new Clock event
+    // I can
+    char iso_time_string[256];
+    time_t now;
+    time(&now);
+    //    strftime(iso_time_string, sizeof iso_time_string, "%FT%TZ", gmtime(&now));
+
+    struct tm *ptm = gmtime(&now);
+
+    if (ptm == NULL) {
+        puts("The gmtime() function failed");
+    }
+
+    sprintf(iso_time_string,"%s", asctime(ptm));
+    // remove traling newline
+    iso_time_string[strcspn(iso_time_string, "\n")] = 0;
+    //    unsigned long cur_ms = get_most_recent_ms(peer);
+    // This is a fake until I figure out how to get it out of the file!
+    Message clockEvent = {
+      'E','C',cur_ms,(uint8_t) strlen(iso_time_string)
+    };
+    strcpy(clockEvent.buff,iso_time_string);
+    uint8_t lbuffer[263];
+    fill_byte_buffer_message(&clockEvent,lbuffer,263);
+
+    handle_event(lbuffer, fd, clientaddr, peer, false);
+}
+
+uint32_t
+log_measurement_bytecode(char *peer, void *buff, bool limit) {
+  Measurement measurement = get_measurement_from_buffer(buff,13);
+
+  FILE *fp = open_log_file(peer,buff);
+  if (!fp) return 0;
+
+  fprintf(fp, "%lu:%c:%c:%c:%u:%u:%d\n", time(NULL),
             measurement.event,
             measurement.type, measurement.loc,
   	  measurement.num, measurement.ms, measurement.val);
   fclose(fp);
+  return measurement.ms;
 }
 
-void
+void get_timestamp( char *buffer, size_t buffersize ) {
+   time_t rawtime;
+   struct tm * timeinfo;
+   time (&rawtime);
+   timeinfo = localtime (&rawtime);
+   strftime (buffer,16,"%G%m%d%H%M%S",timeinfo);
+   puts(buffer);
+}
+
+uint32_t
 log_event_bytecode(char *peer, void *buff, bool limit) {
 
   Message message = get_message_from_buffer(buff,263);
 
-  // xxx need file locking
-  char fname[30];
-  strcpy(fname, "0Logfile.");
-  strcpy(fname + 9, peer);
+  int n = strlen(SAVE_LOG_TO_FILE);
+  if (strncmp(message.buff,SAVE_LOG_TO_FILE,n) == 0) {
+    char *name = message.buff+n;
+      char fname[256];
+      char cname[256];
+      strcpy(fname, "0Logfile.");
+      strcpy(fname + 9, peer);
+      strcpy(cname,fname);
+      strcpy(fname + strlen(fname),".");
+      strcpy(fname + strlen(fname),name);
+      strcpy(fname + strlen(fname),".");
+      get_timestamp(fname+strlen(fname),16);
+      copy_log_file_to_name(peer,fname);
+      //      remove(cname);
+  } else {
+    FILE *fp = open_log_file(peer,buff);
+    if (!fp) return 0;
 
-  FILE *fp = fopen(fname, "a");
-  if (!fp) return;
-
-  // We're no longer doing this
-  //  if (limit) fprintf(fp, "-");
-  fprintf(fp, "%lu:%c:%c:%u:\"%s\"\n",
+    fprintf(fp, "%lu:%c:%c:%u:\"%s\"\n",
           time(NULL),
           message.event,
           message.type,
           message.ms,
           message.buff);
-  fclose(fp);
+      fclose(fp);
+  }
+  return message.ms;
 }
 
 void
 log_json(char *peer, void *buff) {
-  // xxx need file locking
-  char fname[30];
-  strcpy(fname, "0Logfile.");
-  strcpy(fname+9, peer);
 
-  FILE *fp = fopen(fname, "a");
+  FILE *fp = open_log_file(peer,buff);
   if (!fp) return;
+
 
   char *ptr = strchr((char *)buff, '\n');
   if (ptr) *ptr = '\0';
@@ -376,7 +493,7 @@ void zombie_hunter(int sig)
 #endif
 
 int
-handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer) {
+handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer, bool mark_minute) {
   uint8_t x = 0;
   while (message_types[x].type != '\0') {
     if (buffer[0] == message_types[x].type) break;
@@ -443,14 +560,20 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
     break;
     /* The is an *E*vent */
   case 'E':
-    log_event_bytecode(peer, buffer, true);
+    {
+    uint32_t ms = log_event_bytecode(peer, buffer, true);
+    if (mark_minute) {
+      mark_minute_into_stream(ms,fd,clientaddr,peer);
+    }
+
     if (gDEBUG)
       print_event_bytecode(buffer, true);
     if (clientaddr)
-      sendto(fd, "NOP\n", 4, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
+      sendto(fd, "OK\n", 3, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
-      write(fd, "NOP\n", 4);
+      write(fd, "OK\n", 3);
     rvalue = 1;
+    }
     break;
   case 'F':
     if (gDEBUG)
@@ -462,22 +585,32 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
     rvalue = 1;
     break;
   case 'L':
-    log_measurement_bytecode(peer, buffer, true);
+    {
+    uint32_t ms = log_measurement_bytecode(peer, buffer, true);
+    if (mark_minute) {
+      mark_minute_into_stream(ms,fd,clientaddr,peer);
+    }
     if (gDEBUG)
       print_measurement_bytecode(buffer, true);
     if (clientaddr)
       sendto(fd, "OK\n", 3, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "OK\n", 3);
+    }
     break;
   case 'M':
-    log_measurement_bytecode(peer, buffer, false);
+    {
+    uint32_t ms = log_measurement_bytecode(peer, buffer, true);
+    if (mark_minute) {
+      mark_minute_into_stream(ms,fd,clientaddr,peer);
+    }
     if (gDEBUG)
       print_measurement_bytecode(buffer, false);
     if (clientaddr)
       sendto(fd, "OK\n", 3, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "OK\n", 3);
+    }
     break;
   case 'P':
     if (gDEBUG)
@@ -518,6 +651,15 @@ void handle_udp_connx(int listenfd) {
   // MSG_WAITALL or 0????
   int len = recvfrom(listenfd, buffer, BSIZE-1, MSG_WAITALL, (struct sockaddr *) &clientaddr, &addrlen);
 
+  // Exprimental: Create the time before the fork and "mark off" if we are the first
+  // in this minute. The child process which is the first in the minute immediate injects a
+  // clock event.
+  unsigned long xnow = time(NULL);
+  unsigned long cur_minute = xnow / 10;
+  bool new_minute = (cur_minute != epoch_minute);
+  epoch_minute = cur_minute;
+
+
   if (gDEBUG) {
     time_t now = time(NULL);
     struct tm *tm = localtime(&now);
@@ -539,7 +681,8 @@ void handle_udp_connx(int listenfd) {
     fprintf(gFOUTPUT, "\x1b[32m + [%d]\x1b[0m\n", len);
   }
 
-  handle_event(buffer, listenfd, &clientaddr, peer);
+  handle_event(buffer, listenfd, &clientaddr, peer, new_minute);
+  new_minute = 0;
 }
 
 void handle_tcp_connx(int listenfd) {
@@ -568,7 +711,10 @@ void handle_tcp_connx(int listenfd) {
       if (gDEBUG)
 	fprintf(gFOUTPUT, "accept error\n");
     } else {
+
       if (fork() == 0) { // the child
+
+
 #if __linux__
 	if (prctl(PR_SET_PDEATHSIG, SIGTERM) == -1) {
 	  perror("prctl for child");
@@ -591,6 +737,7 @@ void handle_tcp_connx(int listenfd) {
 	}
 
 	while(1) {
+          fflush(gFOUTPUT);
 	  int rcvd;
 #ifdef USESELECT
 	  fd_set fds;
@@ -655,13 +802,17 @@ void handle_tcp_connx(int listenfd) {
 	  if (gDEBUG)
 	    fprintf(gFOUTPUT, "\x1b[32m + [%d]\x1b[0m\n", rcvd);
 
-	  handle_event(buffer, clientfd, NULL, peer);
+          // I probably should do a "new_minute" calculation here,
+          // but I don't know how.
+	  handle_event(buffer, clientfd, NULL, peer, false);
 	}
 	//Closing SOCKET
 	fflush(gFOUTPUT);
 	shutdown(clientfd, SHUT_RDWR);         //All further send and recieve operations are DISABLED...
 	close(clientfd);
       }
+
+
     }
   }
 }

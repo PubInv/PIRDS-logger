@@ -92,7 +92,7 @@ list_datasets() {
   while ((d = readdir(dir))) {
     if (strchr(d->d_name, '~')) continue;
     if (strncmp(d->d_name, "0Logfile.", 9) != 0) continue;
-    if (strspn(d->d_name+9, "0123456789.") != strlen(d->d_name+9)) continue;
+    //    if (strspn(d->d_name+9, "0123456789.") != strlen(d->d_name+9)) continue;
 
     found++;
     char *scriptname = get_envvar("SCRIPT_NAME");
@@ -211,8 +211,16 @@ dump_data(char *ipaddr, int json) {
             // this is not good strong typing,
             // it should be improved.
             printf(" \"buff\": %s }", v);
+        } else if (0 == strcmp(v,"C")) {
+            printf("{ \"event\": \"%s\",","E");
+            printf(" \"type\": \"C\",");
+            v = strtok(NULL, ":");
+            printf(" \"ms\": %s,", v);
+            // Now get the rest of the string, as it is a complex date
+            v = strtok(NULL, "\0");
+            printf(" \"buff\": %s }", v);
         } else {
-          printf("");
+          printf("\"\"");
         }
       }
     }
@@ -248,7 +256,10 @@ int main() {
   char *ipaddr = strtok(path, "/");
   char *type = strtok(NULL, "/");
 
-  if (strlen(ipaddr) && strspn(ipaddr, "1234567890.") == strlen(ipaddr)) {
+  // Probably I will have to take the digits out of this explicitly
+  if (strlen(ipaddr)
+      //      && strspn(ipaddr, "1234567890.") == strlen(ipaddr)
+      ) {
     if (type && strcasecmp(type, "json") == 0) {
       dump_data(ipaddr, 1);
     } else {
@@ -259,6 +270,7 @@ int main() {
     printf("Access-Control-Allow-Origin: *\n");
     printf("\n");
     printf("Bad Request");
+    printf("%s",ipaddr);
   }
   exit(0);
 }

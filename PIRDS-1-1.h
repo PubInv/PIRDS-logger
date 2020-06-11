@@ -82,8 +82,9 @@ typedef struct Message
 } Message;
 
 
-#define FLOW_TOO_HIGH "FLOW OUT OF RANGE HIGH";
-#define FLOW_TOO_LOW  "FLOW OUT OF RANGE LOW";
+#define FLOW_TOO_HIGH "FLOW OUT OF RANGE HIGH"
+#define FLOW_TOO_LOW  "FLOW OUT OF RANGE LOW"
+#define SAVE_LOG_TO_FILE "SAVE_LOG_TO_FILE:"
 
 /* Fill the byte buffer with a PIRDS-standard bytes from the
    Measurement Object */
