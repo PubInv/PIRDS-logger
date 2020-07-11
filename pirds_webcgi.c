@@ -53,7 +53,8 @@ struct {
   NULL, "THE END"
 };
 
-const int PATH_MAX = 256;
+#define PATH_MAX 4096
+
 void
 cgienv_parse() {
   for (uint8_t i = 0; evars[i].name != NULL; i++) {
