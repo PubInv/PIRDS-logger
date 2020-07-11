@@ -16,6 +16,7 @@
 #include <time.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <signal.h>
@@ -52,6 +53,7 @@ struct {
   NULL, "THE END"
 };
 
+const int PATH_MAX = 256;
 void
 cgienv_parse() {
   for (uint8_t i = 0; evars[i].name != NULL; i++) {
@@ -72,8 +74,92 @@ get_envvar(char *value) {
   return NULL;
 }
 
+static inline int file_select(const struct dirent *d)
+{
+  return (strncmp(d->d_name, "0Logfile.", 9) == 0);
+}
+
+char *DIR_NAME = ".";
+static inline int
+sortbydatetime(const struct dirent **a, const struct dirent **b)
+{
+  int rval;
+  struct stat sbuf1, sbuf2;
+  char path1[PATH_MAX], path2[PATH_MAX];
+
+  snprintf(path1, PATH_MAX, "%s/%s", DIR_NAME, (*a)->d_name);
+  snprintf(path2, PATH_MAX, "%s/%s", DIR_NAME, (*b)->d_name);
+
+  rval = stat(path1, &sbuf1);
+  if (rval) {
+    perror("stat");
+    return 0;
+  }
+  rval = stat(path2, &sbuf2);
+  if (rval) {
+    perror("stat");
+    return 0;
+  }
+
+  return sbuf1.st_mtime > sbuf2.st_mtime;
+}
+
+void list_datasets_by_time() {
+  char *DIR_NAME = ".";
+  char path[PATH_MAX];
+
+  DIR *pdir;
+  struct stat sbuf;
+  struct dirent **pdirent;
+
+  struct tm lt;
+  char strdate[16];
+  char strtime[16];
+
+  int nfile = 0;
+
+  pdir = opendir(DIR_NAME);
+  if (!pdir) {
+    perror("opendir");
+    return;
+  }
+
+  int n = scandir(DIR_NAME, &pdirent, file_select, sortbydatetime);
+  if (n == -1) {
+    perror("scandir");
+    return;
+  }
+  while (n--) {
+    if (!((strcmp(pdirent[n]->d_name, ".") == 0) ||
+          (strcmp(pdirent[n]->d_name, "..") == 0)))
+      {
+        snprintf(path, PATH_MAX, "%s/%s", DIR_NAME, pdirent[n]->d_name);
+        int rval = stat(path, &sbuf);
+        if (rval) {
+          perror("stat");
+          return;
+        }
+        localtime_r(&sbuf.st_mtime, &lt);
+        memset(strtime, 0, sizeof(strtime));
+        strftime(strtime, sizeof(strtime), "%H:%M:%S", &lt);
+        memset(strdate, 0, sizeof(strdate));
+        strftime(strdate, sizeof(strdate), "%F", &lt);
+        char *scriptname = get_envvar("SCRIPT_NAME");
+        printf("%s -- <a href=%s%s>raw</a> / <a href=%s%s/json>json</a> / <a href=%sbreath_plot?i=%s>Breath Plot</a><br>",
+               pdirent[n]->d_name+9, scriptname, pdirent[n]->d_name+9, scriptname, pdirent[n]->d_name+9, scriptname, pdirent[n]->d_name+9);
+      }
+    free(pdirent[n]);
+  }
+  free(pdirent);
+}
+
 void
 list_datasets() {
+  char *DIR_NAME = ".";
+
+
+
+
   DIR *dir = opendir(".");
   if (!dir) {
     printf("Content-type: text/plain\n");
@@ -88,20 +174,9 @@ list_datasets() {
   printf("Content-type: text/html\n");
   printf("Access-Control-Allow-Origin: *\n");
   printf("\n");
-
-  while ((d = readdir(dir))) {
-    if (strchr(d->d_name, '~')) continue;
-    if (strncmp(d->d_name, "0Logfile.", 9) != 0) continue;
-    //    if (strspn(d->d_name+9, "0123456789.") != strlen(d->d_name+9)) continue;
-
-    found++;
-    char *scriptname = get_envvar("SCRIPT_NAME");
-    printf("%s -- <a href=%s%s>raw</a> / <a href=%s%s/json>json</a> / <a href=%sbreath_plot?i=%s>Breath Plot</a><br>",
-	   d->d_name+9, scriptname, d->d_name+9, scriptname, d->d_name+9, scriptname, d->d_name+9);
-  }
-  if (!found)
-    printf("No data sets available");
   closedir(dir);
+
+  list_datasets_by_time();
 }
 
 void find_back_lines(FILE *fp, int count) {
@@ -228,6 +303,7 @@ dump_data(char *ipaddr, int json) {
   if ((backlines == 0 || backlines > 1) && json)
     printf("]\n");
   fclose(fp);
+
   return;
 }
 int main() {
