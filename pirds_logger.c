@@ -289,7 +289,7 @@ void mark_minute_into_stream(uint32_t cur_ms, int fd, struct sockaddr_in *client
     // I can
     char iso_time_string[256];
     time_t now;
-    time(&now);
+    //    time(&now);
     //    strftime(iso_time_string, sizeof iso_time_string, "%FT%TZ", gmtime(&now));
 
     struct tm *ptm = gmtime(&now);

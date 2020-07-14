@@ -21,6 +21,8 @@
 #include <netdb.h>
 #include <signal.h>
 #include <errno.h>
+#include "PIRDS-1-1.h"
+
 
 #define EVARSIZE 512
 struct {
@@ -54,6 +56,12 @@ struct {
 };
 
 #define PATH_MAX 4096
+
+// Queries supported:
+// json?n=XXXX -- means returns the most read XXXX samples in
+// Json format.
+// json?n=XXXX&t='UTC' -- means treutn XXXX samples starting at
+// time UTC
 
 void
 cgienv_parse() {
@@ -158,9 +166,6 @@ void
 list_datasets() {
   char *DIR_NAME = ".";
 
-
-
-
   DIR *dir = opendir(".");
   if (!dir) {
     printf("Content-type: text/plain\n");
@@ -197,6 +202,63 @@ void find_back_lines(FILE *fp, int count) {
   return;
 }
 
+void find_line_from_time(FILE *fp, time_t epoch_time_start) {
+  fseek(fp,0,SEEK_SET);
+  char *line = NULL;
+  size_t c = 0;
+  while (getline(&line, &c, fp) > 0) {
+      char *v = strtok(line, ":"); // skip timestamp
+      // We can rely on this as a time stamp
+      long epoch = atoi(v);
+      if (epoch > epoch_time_start)
+        return;
+  }
+}
+
+// https://github.com/abejfehr/URLDecode/blob/master/urldecode.h
+
+/* Function: urlDecode */
+char *urlDecode(const char *str) {
+  int d = 0; /* whether or not the string is decoded */
+
+  char *dStr = malloc(strlen(str) + 1);
+  char eStr[] = "00"; /* for a hex code */
+
+  strcpy(dStr, str);
+
+  while(!d) {
+    d = 1;
+    int i; /* the counter for the string */
+
+    for(i=0;i<strlen(dStr);++i) {
+
+      if(dStr[i] == '%') {
+        if(dStr[i+1] == 0)
+          return dStr;
+
+        if(isxdigit(dStr[i+1]) && isxdigit(dStr[i+2])) {
+
+          d = 0;
+
+          /* combine the next to numbers into one */
+          eStr[0] = dStr[i+1];
+          eStr[1] = dStr[i+2];
+
+          /* convert it to decimal */
+          long int x = strtol(eStr, NULL, 16);
+
+          /* remove the hex */
+          memmove(&dStr[i+1], &dStr[i+3], strlen(&dStr[i+3])+1);
+
+          dStr[i] = x;
+        }
+      }
+    }
+  }
+
+  return dStr;
+}
+
 void
 dump_data(char *ipaddr, int json) {
   if (json)
@@ -218,29 +280,68 @@ dump_data(char *ipaddr, int json) {
   int backlines = 0;
   if (qs && strncmp(qs, "n=", 2) == 0) {
     backlines = atoi(qs+2);
-    if (backlines > 0)
-      find_back_lines(fp, backlines);
+    //    if (backlines > 0)
+      //      find_back_lines(fp, backlines);
+  }
+
+  char *query;
+  char *tokens;
+  char *p;
+  query = strdup (qs);  /* duplicate array, &array is not char** */
+  tokens = query;
+  p = query;
+  //  printf("query %s\n",query);
+  struct tm tm = {0};
+  int time_found = 0;
+  while ((p = strsep (&tokens, "&\n"))) {
+    char *var = strtok (p, "="),
+      *val = NULL;
+    if (var && (val = strtok (NULL, "="))) {
+      //      printf("%s %s\n",var,val);
+      if (!strcmp(var,"t")) {
+        char *decode = urlDecode(val);
+        //               printf("DECODE ==%s\n",decode);
+
+        char *s = strptime(decode, "%a, %d %b %Y %H:%M:%S", &tm);
+        //          printf("First unprocessed |%s|\n",s);
+        //           printf("UTC time: %s", asctime(&tm));
+        time_found = 1;
+        time_t epoch_time_start = timegm ( &tm );
+        //           printf("epoch %ld",(long) epoch_time_start);
+        // This positions in the write spot...
+        find_line_from_time(fp,epoch_time_start);
+        free(decode);
+      }
+    } else {
+      fputs ("<empty field>\n", stderr);
+    }
   }
 
   if ((backlines == 0 || backlines > 1) && json)
     printf("[\n");
 
+  // in fact from the QUERY_STRING we need to get both n=XX and t=YY
+
   int first = 1;
   char *line = NULL;
   size_t c = 0;
-  while (getline(&line, &c, fp) > 0) {
+  int line_cnt = 0;
+  while (getline(&line, &c, fp) > 0 &&
+         (line_cnt < backlines)) {
+    line_cnt++;
     if (!json)
       printf("%s", line);
     else {
       char *ptr;
       if ((ptr = strchr(line, '\r')) || (ptr = strchr(line, '\n')))
-	*ptr = '\0';
+        *ptr = '\0';
       if (!first)
-	printf(",\n");
+        printf(",\n");
       first = 0;
       //      printf("{ \"event\": \"M\",");
       char *v = strtok(line, ":"); // skip timestamp
       v = strtok(NULL, ":");
+      // Note: This fundamentally should come form our main library to reduce duplication
       // This part is for back-compatibility;
       // it should be removed when we have a chance
       if ((0 == strcmp(v,"P")) ||
@@ -301,12 +402,20 @@ dump_data(char *ipaddr, int json) {
       }
     }
   }
+  //  if ((backlines == 0 || backlines > 1) && json)
   if ((backlines == 0 || backlines > 1) && json)
     printf("]\n");
+
+  free (query);
+
+
   fclose(fp);
 
   return;
 }
+
+
+
 int main() {
   cgienv_parse();
 

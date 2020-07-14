@@ -110,3 +110,22 @@ executable.
 We recommend you dowload the repo, run "make" in the pirds_library directory there, then copy the PIRDS.h and PIRDS.o files into this directory as PIRDS-1-1.h and PIRDS-1-1.o.
 This should allow you to "make" the logger and the webserve here on your own computer.
 This will allow you to implement your own (local) data lake, which you may keep private or make public.
+
+
+# Unit Tests for the Server
+
+In July we started adding a feature to the server to provide samples from
+an input point in time. (Previously we had returned only the most recent samples.)
+This feature is based on the PIRDS wall-clock time events being
+injected into the stream.
+
+Because this is complicated enough, we implemented a unit test.
+Since we mostly consume this data with JavaScript, the tests are in
+Node.js.
+
+To run, install Node.js, Mocha and Chai
+
+> npm install --save-dev mocha
+> npm install --save-dev chai
+> npm install --save-dev sync-request
+> npm run test
