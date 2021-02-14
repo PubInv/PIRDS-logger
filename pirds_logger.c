@@ -95,7 +95,7 @@ struct {
 #define UDP 0
 #define TCP 1
 
-uint8_t gDEBUG = 1;
+uint8_t gDEBUG = 0;
 
 #define USESELECT
 #ifdef USESELECT
@@ -506,6 +506,8 @@ void zombie_hunter(int sig)
 }
 #endif
 
+// TODO: The use of mark_minute here is very confusing and duplicative;
+// it should be extracted from the
 int
 handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer, bool mark_minute) {
   uint8_t x = 0;
@@ -528,8 +530,10 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
   int8_t rvalue = 0;
   switch(message_types[x].type) {
   case '{':
-    if (gDEBUG)
-      print_json(buffer);
+    {
+      if (gDEBUG) {
+        print_json(buffer);
+      }
     // If this is an event or a measurmente, we want to log it
     // as bytes, just as if it came in as bytes. If it is not, we will
     // log it as JSON, assuming it is a comment.
@@ -538,42 +542,29 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
     // "get_message_from_JSON". This is functionality we need to add to PIRDS
     // itself!
 
-    uint16_t blim = 1024; // This is much smaller than our actual buffer..
-    char c = get_event_designation_char_from_json((const char *) buffer,blim);
-    fprintf(gFOUTPUT, "|%s|\n", buffer);
-    fprintf(gFOUTPUT, "|%lu|\n", strlen(buffer));
-    fprintf(gFOUTPUT, "char code %c\n", c);
+    //    uint16_t blim = 1024; // This is much smaller than our actual buffer..
+    char c = get_event_designation_char_from_json((const char *) buffer,1024);
     switch (c) {
     case 'M': {
-      fprintf(gFOUTPUT, "AAAA\n");
-      int n = strlen(buffer);
+      int n = strlen((const char *)buffer);
+      if (n >= 1024) {
+        fprintf(gFOUTPUT, "INTERNAL ERROR, BUFFER LENGTH TOO HIGH\n");
+        // I'm not sure what this means
+        return 2;
+      }
       char buff[1024]; // ugly
-      strcpy(buff,buffer);
+      strcpy(buff,(const char *) buffer);
+      Measurement mp = get_measurement_from_JSON((char *) buff,1024);
 
-      fprintf(gFOUTPUT, "|%s|\n", buffer);
-      fprintf(gFOUTPUT, "|%lu|\n", strlen(buffer));
-      fprintf(gFOUTPUT, "|%s|\n", buff);
-      fprintf(gFOUTPUT, "|%lu|\n", strlen(buff));
-      Measurement mp = get_measurement_from_JSON((char *) buff,blim);
-      fprintf(gFOUTPUT, "BBBB\n");
-      render_measurement(&mp);
+
       // TODO: Much of this code below is duplicated; I hate
       // duplication!!
       uint32_t ms = log_measurement_bytecode_from_measurement(peer, &mp, true);
-      fprintf(gFOUTPUT, "CCCC\n");
       if (mark_minute) {
-        fprintf(gFOUTPUT, "MMMMM\n");
         mark_minute_into_stream(ms,fd,clientaddr,peer);
-        fprintf(gFOUTPUT, "NNNNN\n");
       }
-      fprintf(gFOUTPUT, "DDDD\n");
-            fprintf(gFOUTPUT, "|%s|\n", buffer);
-      fprintf(gFOUTPUT, "|%lu|\n", strlen(buffer));
-      fprintf(gFOUTPUT, "|%s|\n", buff);
-      fprintf(gFOUTPUT, "|%lu|\n", strlen(buff));
-      render_measurement(&mp);
-      if (gDEBUG)
-        print_measurement(&mp, true);
+      //      if (gDEBUG)
+      //        print_measurement(&mp, true);
       if (clientaddr)
         sendto(fd, "OK\n", 3, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
       else
@@ -581,8 +572,7 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
       break;
     }
     case 'E': {
-      fprintf(gFOUTPUT, "EEEE\n");
-      Message msg = get_message_from_JSON((char *) buffer,blim);
+      Message msg = get_message_from_JSON((char *) buffer,1024);
       uint32_t ms = log_event_bytecode_from_message(peer, &msg, true);
       if (mark_minute) {
         mark_minute_into_stream(ms,fd,clientaddr,peer);
@@ -598,7 +588,6 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
       break;
     }
     case '\0':
-      fprintf(gFOUTPUT, "FFFF\n");
       if (gDEBUG)
         fprintf(gFOUTPUT, "  Unknown %c Message\n", message_types[x].type);
       if (clientaddr)
@@ -608,7 +597,6 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
       rvalue = 2;
       break;
     default:
-      fprintf(gFOUTPUT, "GGGG\n");
       if (gDEBUG)
         fprintf(gFOUTPUT, "  Unknown %c Message\n", message_types[x].type);
       if (clientaddr)
@@ -619,12 +607,13 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
       break;
     };
 
-    log_json(peer, buffer);
+    //    log_json(peer, buffer);
     if (clientaddr)
       sendto(fd, "OK\n", 3, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
       write(fd, "OK\n", 3);
     break;
+    }
   case '!':
     if (gDEBUG)
       fprintf(gFOUTPUT, "  Emergency Message\n");
