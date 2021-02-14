@@ -51,7 +51,7 @@ SOFTWARE.
 #include <sys/prctl.h> // prctl(), PR_SET_PDEATHSIG
 #endif
 #include <stdbool.h>
-#include "PIRDS-1-1.h"
+#include "PIRDS.h"
 
 
 #define SAVE_LOG_TO_FILE "SAVE_LOG_TO_FILE:"
@@ -95,7 +95,7 @@ struct {
 #define UDP 0
 #define TCP 1
 
-uint8_t gDEBUG = 0;
+uint8_t gDEBUG = 1;
 
 #define USESELECT
 #ifdef USESELECT
@@ -223,7 +223,7 @@ log_measurement_bytecode(char *peer, void *buff, bool limit) {
   struct __attribute__((__packed__)) measurement_t *measurement = (struct measurement_t *) buff;
 */
 
-FILE* open_log_file(char *peer, void *buff) {
+FILE* open_log_file(char *peer) {
   // xxx need file locking
   char fname[30];
   strcpy(fname, "0Logfile.");
@@ -303,29 +303,39 @@ void mark_minute_into_stream(uint32_t cur_ms, int fd, struct sockaddr_in *client
     iso_time_string[strcspn(iso_time_string, "\n")] = 0;
     //    unsigned long cur_ms = get_most_recent_ms(peer);
     // This is a fake until I figure out how to get it out of the file!
+
+    fprintf(gFOUTPUT, "OOOOO\n");
     Message clockEvent = {
       'E','C',cur_ms,(uint8_t) strlen(iso_time_string)
     };
     strcpy(clockEvent.buff,iso_time_string);
     uint8_t lbuffer[263];
+    fprintf(gFOUTPUT, "PPPP\n");
     fill_byte_buffer_message(&clockEvent,lbuffer,263);
+    fprintf(gFOUTPUT, "QQQQ\n");
 
-    handle_event(lbuffer, fd, clientaddr, peer, false);
+    //    handle_event(lbuffer, fd, clientaddr, peer, false);
+    fprintf(gFOUTPUT, "RRRR\n");
 }
 
 uint32_t
 log_measurement_bytecode(char *peer, void *buff, bool limit) {
   Measurement measurement = get_measurement_from_buffer(buff,13);
+  return log_measurement_bytecode(peer,&measurement,limit);
+}
 
-  FILE *fp = open_log_file(peer,buff);
+uint32_t
+log_measurement_bytecode_from_measurement(char *peer, Measurement* measurement, bool limit) {
+
+  FILE *fp = open_log_file(peer);
   if (!fp) return 0;
 
   fprintf(fp, "%lu:%c:%c:%c:%u:%u:%d\n", time(NULL),
-            measurement.event,
-            measurement.type, measurement.loc,
-  	  measurement.num, measurement.ms, measurement.val);
+            measurement->event,
+            measurement->type, measurement->loc,
+  	  measurement->num, measurement->ms, measurement->val);
   fclose(fp);
-  return measurement.ms;
+  return measurement->ms;
 }
 
 void get_timestamp( char *buffer, size_t buffersize ) {
@@ -339,12 +349,16 @@ void get_timestamp( char *buffer, size_t buffersize ) {
 
 uint32_t
 log_event_bytecode(char *peer, void *buff, bool limit) {
-
   Message message = get_message_from_buffer(buff,263);
+  return log_event_bytecode(peer,&message,limit);
+}
+
+uint32_t
+log_event_bytecode_from_message(char *peer, Message* message, bool limit) {
 
   int n = strlen(SAVE_LOG_TO_FILE);
-  if (strncmp(message.buff,SAVE_LOG_TO_FILE,n) == 0) {
-    char *name = message.buff+n;
+  if (strncmp(message->buff,SAVE_LOG_TO_FILE,n) == 0) {
+    char *name = message->buff+n;
       char fname[256];
       char cname[256];
       strcpy(fname, "0Logfile.");
@@ -357,24 +371,24 @@ log_event_bytecode(char *peer, void *buff, bool limit) {
       copy_log_file_to_name(peer,fname);
       //      remove(cname);
   } else {
-    FILE *fp = open_log_file(peer,buff);
+    FILE *fp = open_log_file(peer);
     if (!fp) return 0;
 
     fprintf(fp, "%lu:%c:%c:%u:\"%s\"\n",
           time(NULL),
-          message.event,
-          message.type,
-          message.ms,
-          message.buff);
+          message->event,
+          message->type,
+          message->ms,
+          message->buff);
       fclose(fp);
   }
-  return message.ms;
+  return message->ms;
 }
 
 void
 log_json(char *peer, void *buff) {
 
-  FILE *fp = open_log_file(peer,buff);
+  FILE *fp = open_log_file(peer);
   if (!fp) return;
 
 
@@ -405,71 +419,71 @@ void print_message(Message message,bool limit) {
   fprintf(gFOUTPUT, "  MESSAGE||%s||\n", message.buff);
 }
 
-void print_measurement(Measurement measurement,bool limit);
+void print_measurement(Measurement* measurement,bool limit);
 
 void
 print_measurement_bytecode(void *buff, bool limit) {
   Measurement measurement = get_measurement_from_buffer(buff,13);
-  print_measurement(measurement,limit);
+  print_measurement(&measurement,limit);
 }
 
- void print_measurement(Measurement measurement,bool limit) {
+ void print_measurement(Measurement* measurement,bool limit) {
   //  render_measurement(&measurement);
-  int v = (int) measurement.val;
+  int v = (int) measurement->val;
   float fv = (float) v;
 
-  switch (measurement.type) {
+  switch (measurement->type) {
   case 'T':
     fprintf(gFOUTPUT, "  Temp%s %c%d (%u): %f C\n", limit ? "LIMIT" : "",
-	   measurement.loc, measurement.num, measurement.ms,
+	   measurement->loc, measurement->num, measurement->ms,
             fv /100.0);
     break;
   case 'P':
     fprintf(gFOUTPUT, "  Pressure%s %c%d (%u): %f cm\n", limit ? "LIMIT" : "",
-	   measurement.loc, measurement.num, measurement.ms,
+	   measurement->loc, measurement->num, measurement->ms,
             fv /100.0);
     break;
   case 'D':
     fprintf(gFOUTPUT, "  DifferentialPressure%s %c%d (%u): %f cm\n", limit ? "LIMIT" : "",
-	   measurement.loc, measurement.num, measurement.ms,
+	   measurement->loc, measurement->num, measurement->ms,
             fv /10.0);
     break;
   case 'F':
     fprintf(gFOUTPUT, "  Flow%s %c%d (%u): %f l\n", limit ? "LIMIT" : "",
-	   measurement.loc, measurement.num, measurement.ms,
+	   measurement->loc, measurement->num, measurement->ms,
             fv /100.0);
     break;
   case 'O':
     fprintf(gFOUTPUT, "  FractionalO2%s %c%d (%u): %f%%\n", limit ? "LIMIT" : "",
-	   measurement.loc, measurement.num, measurement.ms,
+	   measurement->loc, measurement->num, measurement->ms,
             fv /100.0);
     break;
   case 'H':
     fprintf(gFOUTPUT, "  Humidity%s %c%d (%u): %f%%\n", limit ? "LIMIT" : "",
-	   measurement.loc, measurement.num, measurement.ms,
+	   measurement->loc, measurement->num, measurement->ms,
 	   fv/100.0);
     break;
   case 'V':
     fprintf(gFOUTPUT, "  Volume%s %c%d (%u): %d ml\n", limit ? "LIMIT" : "",
-	   measurement.loc, measurement.num, measurement.ms,
+	   measurement->loc, measurement->num, measurement->ms,
 	   v);
     break;
   case 'B':
     fprintf(gFOUTPUT, "  Breaths%s %c%d (%u): %d\n", limit ? "LIMIT" : "",
-	   measurement.loc, measurement.num, measurement.ms,
+	   measurement->loc, measurement->num, measurement->ms,
 	   v/10);
     break;
   case 'G':
     fprintf(gFOUTPUT, "  Gas%s %c%d (%u): %d\n", limit ? "LIMIT" : "",
-	   measurement.loc, measurement.num, measurement.ms,
+	   measurement->loc, measurement->num, measurement->ms,
 	   v);
     break;
   case 'A':
     fprintf(gFOUTPUT, "  Altitude%s %c%d (%u): %d m\n", limit ? "LIMIT" : "",
-	   measurement.loc, measurement.num, measurement.ms,
+	   measurement->loc, measurement->num, measurement->ms,
 	   v);
     break;
-  default: fprintf(gFOUTPUT, "Invalid measurement type\n");
+  default: fprintf(gFOUTPUT, "Invalid measurement type: %c\n",measurement->type);
   }
 }
 
@@ -516,6 +530,95 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
   case '{':
     if (gDEBUG)
       print_json(buffer);
+    // If this is an event or a measurmente, we want to log it
+    // as bytes, just as if it came in as bytes. If it is not, we will
+    // log it as JSON, assuming it is a comment.
+    // we will want to call get_measurement_from_JSON here, unless
+    // the the "event" type is an "M", in which case we get to do
+    // "get_message_from_JSON". This is functionality we need to add to PIRDS
+    // itself!
+
+    uint16_t blim = 1024; // This is much smaller than our actual buffer..
+    char c = get_event_designation_char_from_json((const char *) buffer,blim);
+    fprintf(gFOUTPUT, "|%s|\n", buffer);
+    fprintf(gFOUTPUT, "|%lu|\n", strlen(buffer));
+    fprintf(gFOUTPUT, "char code %c\n", c);
+    switch (c) {
+    case 'M': {
+      fprintf(gFOUTPUT, "AAAA\n");
+      int n = strlen(buffer);
+      char buff[1024]; // ugly
+      strcpy(buff,buffer);
+
+      fprintf(gFOUTPUT, "|%s|\n", buffer);
+      fprintf(gFOUTPUT, "|%lu|\n", strlen(buffer));
+      fprintf(gFOUTPUT, "|%s|\n", buff);
+      fprintf(gFOUTPUT, "|%lu|\n", strlen(buff));
+      Measurement mp = get_measurement_from_JSON((char *) buff,blim);
+      fprintf(gFOUTPUT, "BBBB\n");
+      render_measurement(&mp);
+      // TODO: Much of this code below is duplicated; I hate
+      // duplication!!
+      uint32_t ms = log_measurement_bytecode_from_measurement(peer, &mp, true);
+      fprintf(gFOUTPUT, "CCCC\n");
+      if (mark_minute) {
+        fprintf(gFOUTPUT, "MMMMM\n");
+        mark_minute_into_stream(ms,fd,clientaddr,peer);
+        fprintf(gFOUTPUT, "NNNNN\n");
+      }
+      fprintf(gFOUTPUT, "DDDD\n");
+            fprintf(gFOUTPUT, "|%s|\n", buffer);
+      fprintf(gFOUTPUT, "|%lu|\n", strlen(buffer));
+      fprintf(gFOUTPUT, "|%s|\n", buff);
+      fprintf(gFOUTPUT, "|%lu|\n", strlen(buff));
+      render_measurement(&mp);
+      if (gDEBUG)
+        print_measurement(&mp, true);
+      if (clientaddr)
+        sendto(fd, "OK\n", 3, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
+      else
+        write(fd, "OK\n", 3);
+      break;
+    }
+    case 'E': {
+      fprintf(gFOUTPUT, "EEEE\n");
+      Message msg = get_message_from_JSON((char *) buffer,blim);
+      uint32_t ms = log_event_bytecode_from_message(peer, &msg, true);
+      if (mark_minute) {
+        mark_minute_into_stream(ms,fd,clientaddr,peer);
+      }
+
+      if (gDEBUG)
+        print_event_bytecode(buffer, true);
+      if (clientaddr)
+        sendto(fd, "OK\n", 3, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
+      else
+        write(fd, "OK\n", 3);
+      rvalue = 1;
+      break;
+    }
+    case '\0':
+      fprintf(gFOUTPUT, "FFFF\n");
+      if (gDEBUG)
+        fprintf(gFOUTPUT, "  Unknown %c Message\n", message_types[x].type);
+      if (clientaddr)
+        sendto(fd, "UNK\n", 4, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
+      else
+        write(fd, "UNK\n", 4);
+      rvalue = 2;
+      break;
+    default:
+      fprintf(gFOUTPUT, "GGGG\n");
+      if (gDEBUG)
+        fprintf(gFOUTPUT, "  Unknown %c Message\n", message_types[x].type);
+      if (clientaddr)
+        sendto(fd, "UNK\n", 4, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
+      else
+        write(fd, "UNK\n", 4);
+      rvalue = 2;
+      break;
+    };
+
     log_json(peer, buffer);
     if (clientaddr)
       sendto(fd, "OK\n", 3, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
