@@ -36,6 +36,54 @@ SOFTWARE.
 
 ***************************************/
 
+/****
+
+Note on timing: This code receives relative time streams with
+millisecond timers, but converts into absolute wall clock time.
+
+Because of transmission time varies, we must trust the ms timers
+in the samples sent to us, but these times are RELATIVE to each
+other we---we do not expect embedded microcontrollers to know
+what time it is in an absolute sense.
+
+Our strategy is to place a mark every 10 seconds in the log file
+which has the real UTC time (known on POSIX systems.) At this
+time we record the ms time of the event that we receive. Call this
+the "high water mark ms".
+
+For the next 10 seconds, we sutract that ms time from the incoming stream
+to get a quasi-accurate real UTC time for each sample. We record this
+time in UNIX EPOCH milliseconds (NOT SECONDS). Yes, I know it will
+fail in 2038. The time stream is thus a correct wave form relative to
+itself.
+
+A problem occurs at the time that a stream resets; for example,
+if someone powers off a microprocessor, its ms clock likely starts over
+again. (This is true of UNO-class microprocessors, and we want to support
+these.) This time series can have no meaningful relative meaning compared
+to the previous time series.
+
+Since UDP does not guarantee delivery or the order of time streams,
+we may get an "old" packet out of order. This could in theory mess up
+our calculations.
+
+If a fresh time series has a previous high-water time mark subtracted from it,
+it will appear to move backwards in UTC time.
+
+However, we are assuming a lossy system anyway if we are using UDP.
+
+Our basic strategy will be:
+
+1) If we receive HW_TOLERANCE samples earlier than the HIGH_WATER_MARK_MS,
+we will reset the HIGH_WATER_MARK_MS.
+
+Note: This strategy is subject to a disruptive hacking attack that sends
+ms numbers that are too high or too low. However, we are using completely
+open UDP anyway; when the time comes to provide security, we will have to use
+TCP transmission or some other approach to security.
+
+ ***/
+
 #define VERSION 1.7
 
 #define _GNU_SOURCE
@@ -107,6 +155,14 @@ uint8_t gDEBUG = 1;
 uint8_t buffer[BSIZE];
 
 #define ONE_EVENT_BUFFER_SIZE 1024
+
+// This might not need to be 64 bit, but we will be adding UNIX epoch time in ms to it, so this
+// is simpler.
+uint64_t HIGH_WATER_MARK_MS = 0;
+uint64_t HIGH_WATER_MARK_EPOCH_MS = 0; // ms since the epoch at time of last "minute mark" set in the log file
+// ms-times samples more recent than HIGH_WATER_MARK_MS are NOT logged and increment a count
+#define HIGH_WATER_MARK_TOLERANCE 10
+int HIGH_WATER_MARK_TOLERANCE_COUNT = 0;
 
 void handle_udp_connx(int listenfd);
 void handle_tcp_connx(int listenfd);
@@ -294,6 +350,9 @@ void mark_minute_into_stream(uint32_t cur_ms, int fd, struct sockaddr_in *client
     time_t now;
     time(&now);
 
+    HIGH_WATER_MARK_EPOCH_MS = (uint64_t) now*1000;
+    HIGH_WATER_MARK_MS = (uint64_t) cur_ms;
+
     struct tm *ptm = gmtime(&now);
 
     if (ptm == NULL) {
@@ -325,10 +384,24 @@ log_measurement_bytecode_from_measurement(char *peer, Measurement* measurement, 
   FILE *fp = open_log_file(peer);
   if (!fp) return 0;
 
-  fprintf(fp, "%lu:%c:%c:%c:%u:%u:%d\n", time(NULL),
+  if (measurement->ms < HIGH_WATER_MARK_MS) {
+    fprintf(gFOUTPUT,"INTERNAL ERROR: HIGH_WATER_MARK_MS INCONSISTENT");
+  } else {
+    uint64_t displacement = (((uint64_t) measurement->ms) - HIGH_WATER_MARK_MS);
+    uint64_t ms = HIGH_WATER_MARK_EPOCH_MS +
+      (((uint64_t) measurement->ms) - HIGH_WATER_MARK_MS);
+
+      fprintf(fp, "displacement %llu:\n",
+              displacement);
+
+      fprintf(fp, "ms %llu:\n",
+              ms);
+
+    fprintf(fp, "%lu:%c:%c:%c:%u:%llu:%d\n", time(NULL),
             measurement->event,
             measurement->type, measurement->loc,
-  	  measurement->num, measurement->ms, measurement->val);
+            measurement->num, ms, measurement->val);
+  }
   fclose(fp);
   return measurement->ms;
 }
@@ -364,12 +437,22 @@ log_event_bytecode_from_message(char *peer, Message* message, bool limit) {
     FILE *fp = open_log_file(peer);
     if (!fp) return 0;
 
-    fprintf(fp, "%lu:%c:%c:%u:\"%s\"\n",
-          time(NULL),
-          message->event,
-          message->type,
-          message->ms,
-          message->buff);
+    // Here we perform the HIGH_WATER_MARK_MATH
+    // Note: The second summand had better be positive..
+
+    if (message->ms < HIGH_WATER_MARK_MS) {
+      fprintf(gFOUTPUT,"INTERNAL ERROR: HIGH_WATER_MARK_MS INCONSISTENT");
+    } else {
+      uint64_t ms = HIGH_WATER_MARK_EPOCH_MS +
+        (((uint64_t)message->ms) - HIGH_WATER_MARK_MS);
+
+      fprintf(fp, "%lu:%c:%c:%llu:\"%s\"\n",
+              time(NULL),
+              message->event,
+              message->type,
+              ms,
+              message->buff);
+    }
       fclose(fp);
   }
   return message->ms;
@@ -502,6 +585,24 @@ void zombie_hunter(int sig)
 }
 #endif
 
+int process_high_water(uint64_t ms) {
+  if (ms >= HIGH_WATER_MARK_MS) {
+    fprintf(gFOUTPUT, "HIGH_WATER_MS %llu\n",HIGH_WATER_MARK_MS);
+    return ms;
+  } else {
+    HIGH_WATER_MARK_TOLERANCE_COUNT++;
+    if (HIGH_WATER_MARK_TOLERANCE_COUNT > HIGH_WATER_MARK_TOLERANCE) {
+      HIGH_WATER_MARK_TOLERANCE_COUNT = 0;
+      // Settting this here is debatable; possiblye it should
+      // oly be set when the epoch mark changes!
+      HIGH_WATER_MARK_MS = ms;
+      return -1;
+    }
+    fprintf(gFOUTPUT, "HIGH_WATER_MS %llu\n",HIGH_WATER_MARK_MS);
+    return ms;
+  }
+}
+
 // TODO: The use of mark_minute here is very confusing and duplicative;
 // it should be extracted from the
 int
@@ -529,6 +630,7 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
   int8_t rvalue = 0;
   switch(message_types[x].type) {
   case '{':
+    // TODO: This should be moved out to a separate function
     {
     // If this is an event or a measurmente, we want to log it
     // as bytes, just as if it came in as bytes. If it is not, we will
@@ -551,7 +653,7 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
       //      strcpy(buff,(const char *) buffer);
       Measurement mp = get_measurement_from_JSON((char *) buffer,ONE_EVENT_BUFFER_SIZE);
 
-
+      process_high_water((uint64_t) mp.ms);
       // TODO: Much of this code below is duplicated; I hate
       // duplication!!
       uint32_t ms = log_measurement_bytecode_from_measurement(peer, &mp, true);
@@ -566,6 +668,8 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
     }
     case 'E': {
       Message msg = get_message_from_buffer(buffer,ONE_EVENT_BUFFER_SIZE);
+      process_high_water((uint64_t)msg.ms);
+
       uint32_t ms = log_event_bytecode_from_message(peer, &msg, true);
       if (mark_minute) {
         mark_minute_into_stream(ms,fd,clientaddr,peer);
