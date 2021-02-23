@@ -40,6 +40,7 @@ SOFTWARE.
 
 #define _GNU_SOURCE
 #include <stdio.h>
+#include <ctype.h>
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
@@ -95,7 +96,7 @@ struct {
 #define UDP 0
 #define TCP 1
 
-uint8_t gDEBUG = 0;
+uint8_t gDEBUG = 1;
 
 #define USESELECT
 #ifdef USESELECT
@@ -104,6 +105,8 @@ uint8_t gDEBUG = 0;
 
 #define BSIZE 65*1024
 uint8_t buffer[BSIZE];
+
+#define ONE_EVENT_BUFFER_SIZE 1024
 
 void handle_udp_connx(int listenfd);
 void handle_tcp_connx(int listenfd);
@@ -297,25 +300,18 @@ void mark_minute_into_stream(uint32_t cur_ms, int fd, struct sockaddr_in *client
     if (ptm == NULL) {
         puts("The gmtime() function failed");
     }
-
     sprintf(iso_time_string,"%s", asctime(ptm));
     // remove traling newline
     iso_time_string[strcspn(iso_time_string, "\n")] = 0;
     //    unsigned long cur_ms = get_most_recent_ms(peer);
     // This is a fake until I figure out how to get it out of the file!
-
-    fprintf(gFOUTPUT, "OOOOO\n");
     Message clockEvent = {
       'E','C',cur_ms,(uint8_t) strlen(iso_time_string)
     };
     strcpy(clockEvent.buff,iso_time_string);
     uint8_t lbuffer[263];
-    fprintf(gFOUTPUT, "PPPP\n");
     fill_byte_buffer_message(&clockEvent,lbuffer,263);
-    fprintf(gFOUTPUT, "QQQQ\n");
-
-    //    handle_event(lbuffer, fd, clientaddr, peer, false);
-    fprintf(gFOUTPUT, "RRRR\n");
+    handle_event(lbuffer, fd, clientaddr, peer, false);
 }
 
 uint32_t
@@ -347,11 +343,6 @@ void get_timestamp( char *buffer, size_t buffersize ) {
    puts(buffer);
 }
 
-uint32_t
-log_event_bytecode(char *peer, void *buff, bool limit) {
-  Message message = get_message_from_buffer(buff,263);
-  return log_event_bytecode(peer,&message,limit);
-}
 
 uint32_t
 log_event_bytecode_from_message(char *peer, Message* message, bool limit) {
@@ -383,6 +374,11 @@ log_event_bytecode_from_message(char *peer, Message* message, bool limit) {
       fclose(fp);
   }
   return message->ms;
+}
+
+uint32_t log_event_bytecode(char *peer, void *buff, bool limit) {
+  Message message = get_message_from_buffer(buff,263);
+  return log_event_bytecode_from_message(peer,&message,limit);
 }
 
 void
@@ -487,6 +483,7 @@ print_measurement_bytecode(void *buff, bool limit) {
   }
 }
 
+// I'm confused as to what this does! - rlr
 void
 print_json(void *buff) {
   char *ptr = strchr(buff, '\n');
@@ -510,6 +507,9 @@ void zombie_hunter(int sig)
 // it should be extracted from the
 int
 handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer, bool mark_minute) {
+  char *xbuffer = (char *) buffer;
+
+  // TODO: This should be a a function...
   uint8_t x = 0;
   while (message_types[x].type != '\0') {
     if (buffer[0] == message_types[x].type) break;
@@ -518,7 +518,7 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
 
   if (message_types[x].type == '\0') {
     if (gDEBUG)
-      fprintf(gFOUTPUT, "  Invalid Message\n");
+      fprintf(gFOUTPUT, "  Invalid Message from buffer |%s|\n",buffer);
     return 0;
   }
 
@@ -531,9 +531,6 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
   switch(message_types[x].type) {
   case '{':
     {
-      if (gDEBUG) {
-        print_json(buffer);
-      }
     // If this is an event or a measurmente, we want to log it
     // as bytes, just as if it came in as bytes. If it is not, we will
     // log it as JSON, assuming it is a comment.
@@ -542,19 +539,18 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
     // "get_message_from_JSON". This is functionality we need to add to PIRDS
     // itself!
 
-    //    uint16_t blim = 1024; // This is much smaller than our actual buffer..
-    char c = get_event_designation_char_from_json((const char *) buffer,1024);
+    char c = get_event_designation_char_from_json((const char *) buffer,ONE_EVENT_BUFFER_SIZE);
     switch (c) {
     case 'M': {
       int n = strlen((const char *)buffer);
-      if (n >= 1024) {
+      if (n >= ONE_EVENT_BUFFER_SIZE) {
         fprintf(gFOUTPUT, "INTERNAL ERROR, BUFFER LENGTH TOO HIGH\n");
         // I'm not sure what this means
         return 2;
       }
-      char buff[1024]; // ugly
-      strcpy(buff,(const char *) buffer);
-      Measurement mp = get_measurement_from_JSON((char *) buff,1024);
+      //      char buff[1024]; // ugly
+      //      strcpy(buff,(const char *) buffer);
+      Measurement mp = get_measurement_from_JSON((char *) buffer,ONE_EVENT_BUFFER_SIZE);
 
 
       // TODO: Much of this code below is duplicated; I hate
@@ -563,8 +559,6 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
       if (mark_minute) {
         mark_minute_into_stream(ms,fd,clientaddr,peer);
       }
-      //      if (gDEBUG)
-      //        print_measurement(&mp, true);
       if (clientaddr)
         sendto(fd, "OK\n", 3, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
       else
@@ -572,7 +566,7 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
       break;
     }
     case 'E': {
-      Message msg = get_message_from_JSON((char *) buffer,1024);
+      Message msg = get_message_from_buffer(buffer,ONE_EVENT_BUFFER_SIZE);
       uint32_t ms = log_event_bytecode_from_message(peer, &msg, true);
       if (mark_minute) {
         mark_minute_into_stream(ms,fd,clientaddr,peer);
@@ -584,6 +578,7 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
         sendto(fd, "OK\n", 3, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
       else
         write(fd, "OK\n", 3);
+
       rvalue = 1;
       break;
     }
@@ -653,10 +648,10 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
     /* The is an *E*vent */
   case 'E':
     {
-    uint32_t ms = log_event_bytecode(peer, buffer, true);
-    if (mark_minute) {
-      mark_minute_into_stream(ms,fd,clientaddr,peer);
-    }
+      uint32_t ms = log_event_bytecode(peer, buffer, true);
+      if (mark_minute) {
+        mark_minute_into_stream(ms,fd,clientaddr,peer);
+      }
 
     if (gDEBUG)
       print_event_bytecode(buffer, true);
@@ -714,8 +709,9 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
     rvalue = 1;
     break;
   case 'S':
-    if (gDEBUG)
+    if (gDEBUG) {
       fprintf(gFOUTPUT, "  aSsertion Message\n");
+    }
     if (clientaddr)
       sendto(fd, "NOP\n", 4, flags, (struct sockaddr *) clientaddr, sizeof *clientaddr);
     else
@@ -734,6 +730,42 @@ handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer
   }
   return rvalue;
 }
+// https://stackoverflow.com/questions/122616/how-do-i-trim-leading-trailing-whitespace-in-a-standard-way
+// Stores the trimmed input string into the given output buffer, which must be
+// large enough to store the result.  If it is too small, the output is
+// truncated.
+size_t trimwhitespaceX(char *out, size_t len, const char *str)
+{
+  if(len == 0)
+    return 0;
+
+  const char *end;
+  size_t out_size;
+
+  // Trim leading space
+  while(isspace((unsigned char)*str)) str++;
+
+  if(*str == 0)  // All spaces?
+  {
+    *out = 0;
+    return 1;
+  }
+
+  // Trim trailing space
+  end = str + strlen(str) - 1;
+  while(end > str && isspace((unsigned char)*end)) end--;
+  end++;
+
+  // Set output size to minimum of trimmed string length and buffer size minus 1
+  out_size = (end - str) < len-1 ? (end - str) : len-1;
+
+  // Copy trimmed string and add null terminator
+  memcpy(out, str, out_size);
+  out[out_size] = 0;
+
+  return out_size;
+}
+
 
 //client connection
 void handle_udp_connx(int listenfd) {
@@ -773,8 +805,21 @@ void handle_udp_connx(int listenfd) {
     fprintf(gFOUTPUT, "\x1b[32m + [%d]\x1b[0m\n", len);
   }
 
-  handle_event(buffer, listenfd, &clientaddr, peer, new_minute);
-  new_minute = 0;
+
+  char lbuff[ONE_EVENT_BUFFER_SIZE];
+  size_t res = trimwhitespaceX(lbuff, ONE_EVENT_BUFFER_SIZE, (const char *) buffer);
+  if (gDEBUG) {
+    fprintf(gFOUTPUT,"%s\n",lbuff);
+    fflush(gFOUTPUT);
+  }
+  if ((lbuff[0] != '{') || (lbuff[strlen(lbuff) -1] != '}')) {
+      if (gDEBUG) {
+        fprintf(gFOUTPUT,"INVALID, not processing: [%s]\n",lbuff);
+        fflush(gFOUTPUT);
+      }
+  } else {
+    handle_event((uint8_t *)lbuff, listenfd, &clientaddr, peer, new_minute);
+  }
 }
 
 void handle_tcp_connx(int listenfd) {

@@ -278,10 +278,13 @@ dump_data(char *ipaddr, int json) {
   }
   char *qs = get_envvar("QUERY_STRING");
   int backlines = 0;
+
+  fprintf(stderr,"backlines %d:\n",backlines);
+
   if (qs && strncmp(qs, "n=", 2) == 0) {
     backlines = atoi(qs+2);
-    //    if (backlines > 0)
-      //      find_back_lines(fp, backlines);
+    if (backlines > 0)
+    find_back_lines(fp, backlines);
   }
 
   char *query;
