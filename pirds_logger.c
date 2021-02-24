@@ -391,12 +391,6 @@ log_measurement_bytecode_from_measurement(char *peer, Measurement* measurement, 
     uint64_t ms = HIGH_WATER_MARK_EPOCH_MS +
       (((uint64_t) measurement->ms) - HIGH_WATER_MARK_MS);
 
-      fprintf(fp, "displacement %llu:\n",
-              displacement);
-
-      fprintf(fp, "ms %llu:\n",
-              ms);
-
     fprintf(fp, "%lu:%c:%c:%c:%u:%llu:%d\n", time(NULL),
             measurement->event,
             measurement->type, measurement->loc,
@@ -587,7 +581,6 @@ void zombie_hunter(int sig)
 
 int process_high_water(uint64_t ms) {
   if (ms >= HIGH_WATER_MARK_MS) {
-    fprintf(gFOUTPUT, "HIGH_WATER_MS %llu\n",HIGH_WATER_MARK_MS);
     return ms;
   } else {
     HIGH_WATER_MARK_TOLERANCE_COUNT++;
@@ -598,7 +591,6 @@ int process_high_water(uint64_t ms) {
       HIGH_WATER_MARK_MS = ms;
       return -1;
     }
-    fprintf(gFOUTPUT, "HIGH_WATER_MS %llu\n",HIGH_WATER_MARK_MS);
     return ms;
   }
 }
