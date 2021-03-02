@@ -373,12 +373,6 @@ void mark_minute_into_stream(uint32_t cur_ms, int fd, struct sockaddr_in *client
 }
 
 uint32_t
-log_measurement_bytecode(char *peer, void *buff, bool limit) {
-  Measurement measurement = get_measurement_from_buffer(buff,13);
-  return log_measurement_bytecode(peer,&measurement,limit);
-}
-
-uint32_t
 log_measurement_bytecode_from_measurement(char *peer, Measurement* measurement, bool limit) {
 
   FILE *fp = open_log_file(peer);
@@ -399,6 +393,13 @@ log_measurement_bytecode_from_measurement(char *peer, Measurement* measurement, 
   fclose(fp);
   return measurement->ms;
 }
+
+uint32_t
+log_measurement_bytecode(char *peer, void *buff, bool limit) {
+  Measurement measurement = get_measurement_from_buffer(buff,13);
+  return log_measurement_bytecode_from_measurement(peer,&measurement,limit);
+}
+
 
 void get_timestamp( char *buffer, size_t buffersize ) {
    time_t rawtime;
@@ -599,8 +600,6 @@ int process_high_water(uint64_t ms) {
 // it should be extracted from the
 int
 handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer, bool mark_minute) {
-  char *xbuffer = (char *) buffer;
-
   // TODO: This should be a a function...
   uint8_t x = 0;
   while (message_types[x].type != '\0') {
@@ -897,24 +896,29 @@ void handle_udp_connx(int listenfd) {
 
   if (gDEBUG) {
     fprintf(gFOUTPUT, "(%s) ", peer);
-    fprintf(gFOUTPUT, "\x1b[32m + [%d]\x1b[0m\n", len);
+    fprintf(gFOUTPUT, "len: [%d]\n", len);    
+    //    fprintf(gFOUTPUT, "(%s)\n", buffer);    
   }
-
-
-  char lbuff[ONE_EVENT_BUFFER_SIZE];
-  size_t res = trimwhitespaceX(lbuff, ONE_EVENT_BUFFER_SIZE, (const char *) buffer);
-  if (gDEBUG) {
-    fprintf(gFOUTPUT,"%s\n",lbuff);
-    fflush(gFOUTPUT);
-  }
-  if ((lbuff[0] != '{') || (lbuff[strlen(lbuff) -1] != '}')) {
-      if (gDEBUG) {
-        fprintf(gFOUTPUT,"INVALID, not processing: [%s]\n",lbuff);
-        fflush(gFOUTPUT);
-      }
+  //    This is a bit of a problem---we support both bytes and
+  //      JSON, but have no truly excellent way of deciding which!
+  // If the len == 14, we are byte buffer message!
+  if (len != 14) {
+    char lbuff[ONE_EVENT_BUFFER_SIZE];
+    size_t res = trimwhitespaceX(lbuff, ONE_EVENT_BUFFER_SIZE, (const char *) buffer);
+    if (gDEBUG) {
+      fprintf(gFOUTPUT,"%s\n",lbuff);
+      fflush(gFOUTPUT);
+    }
+      if ((lbuff[0] != '{') || (lbuff[strlen(lbuff) -1] != '}')) {
+	if (gDEBUG) {
+	  fprintf(gFOUTPUT,"INVALID, not processing: [%s]\n",lbuff);
+	  fflush(gFOUTPUT);
+	}
+      } else {
+      handle_event((uint8_t *)lbuff, listenfd, &clientaddr, peer, new_minute);
+    }
   } else {
-    handle_event((uint8_t *)lbuff, listenfd, &clientaddr, peer, new_minute);
-  }
+    handle_event((uint8_t *)buffer, listenfd, &clientaddr, peer, new_minute);    }
 }
 
 void handle_tcp_connx(int listenfd) {
