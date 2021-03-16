@@ -5,3 +5,4 @@ pirds_logger: Makefile pirds_logger.c PIRDS.o Makefile
 
 pirds_webcgi: Makefile pirds_webcgi.c PIRDS.h PIRDS.o Makefile
 	gcc -o pirds_webcgi pirds_webcgi.c PIRDS.o
+	cp pirds_webcgi cgi-bin

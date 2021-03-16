@@ -21,6 +21,7 @@
 #include <netdb.h>
 #include <signal.h>
 #include <errno.h>
+#include <assert.h>
 #include "PIRDS.h"
 
 
@@ -270,6 +271,7 @@ dump_data(char *ipaddr, int json) {
 
   char *fname = NULL;
   asprintf(&fname, "0Logfile.%s", ipaddr);
+  fprintf(stderr,"fname = %s\n",fname);
   FILE *fp = fopen(fname, "r");
   if (fname) free(fname);
   if (!fp) {
@@ -409,18 +411,67 @@ dump_data(char *ipaddr, int json) {
 
   free (query);
 
-
   fclose(fp);
 
   return;
 }
 
+// This function copied from: https://stackoverflow.com/questions/9210528/split-string-with-delimiters-in-c
+char** str_split(char* a_str, const char a_delim)
+{
+    char** result    = 0;
+    size_t count     = 0;
+    char* tmp        = a_str;
+    char* last_comma = 0;
+    char delim[2];
+    delim[0] = a_delim;
+    delim[1] = 0;
+
+    /* Count how many elements will be extracted. */
+    while (*tmp)
+    {
+        if (a_delim == *tmp)
+        {
+            count++;
+            last_comma = tmp;
+        }
+        tmp++;
+    }
+
+    /* Add space for trailing token. */
+    count += last_comma < (a_str + strlen(a_str) - 1);
+
+    /* Add space for terminating null string so caller
+       knows where the list of returned strings ends. */
+    count++;
+
+    result = malloc(sizeof(char*) * count);
+    result[count-1] = 0;
+
+    if (result)
+    {
+        size_t idx  = 0;
+        char* token = strtok(a_str, delim);
+
+        while (token)
+        {
+            assert(idx < count);
+            *(result + idx++) = strdup(token);
+            token = strtok(0, delim);
+        }
+    }
+
+    return result;
+}
 
 
 int main() {
   cgienv_parse();
 
   char *uri = get_envvar("REQUEST_URI");
+
+  char *qs = get_envvar("QUERY_STRING");
+
   if (uri == NULL) {
     printf("Content-type: text/plain\n");
     printf("Access-Control-Allow-Origin: *\n");
@@ -429,35 +480,70 @@ int main() {
     exit(1);
   }
 
-  char *path = strdup(uri+1);
-  //  char *path = strdup(uri+14);
-  char *ptr;
-  if ((ptr = strchr(path, '?')))
-    *ptr = '\0';
+  // I think I want to make this code more robust so the url can be served
+  // from different places.
+  // The basic role is: If the last / sesparated token is of the form
+  // d?.d?.d?.d? then we will NOT last the datasets. Otherwise we will.
+  // If the form is /json/ipaddr", then we treat the type as JSON ("1") below.
+  // Else we provide the raw data "0" below.
 
-  if (strlen(path) == 0 || strcmp(path, "/") == 0) {
+
+  char *path_for_uri = strdup(uri+1);
+
+  // I want to process the URI without the QUERY_STRONG present.
+  char** uri_tokens;
+  uri_tokens = str_split(path_for_uri, '?');
+  char uri_only[256];
+
+  strcpy(uri_only,uri_tokens[0]);
+  // now we deallocate...
+
+  // tokens[1] if it exist should be the query string...
+  if (uri_tokens[1]) {
+    assert(strcmp(uri_tokens[1],qs) == 0);
+  }
+
+  {
+    size_t i;
+    for (i = 0; *(uri_tokens + i); i++)
+      {
+        free(*(uri_tokens + i));
+      }
+  }
+
+  char** tokens;
+  tokens = str_split(uri_only, '/');
+
+  // we need only the last token and (posibly) the penultimate token;
+  char ult_token[256];
+  char pen_token[256];
+  ult_token[0] = '\0';
+  pen_token[0] = '\0';
+  if (tokens) {
+      size_t i;
+      for (i = 0; *(tokens + i); i++)
+        {
+          strcpy(pen_token,ult_token);
+          strcpy(ult_token,*(tokens + i));
+          free(*(tokens + i));
+        }
+      free(tokens);
+      if (strlen(ult_token)) {
+        if (strlen(pen_token) && strcasecmp(ult_token, "json") == 0) {
+          dump_data(pen_token, 1);
+        } else {
+          dump_data(ult_token, 0);
+        }
+      } else {
+        printf("Content-type: text/plain\n");
+        printf("Access-Control-Allow-Origin: *\n");
+        printf("\n");
+        printf("Bad Request");
+        printf("%s",ult_token);
+        exit(0);
+      }
+  } else {
     list_datasets();
     exit(0);
   }
-
-  char *ipaddr = strtok(path, "/");
-  char *type = strtok(NULL, "/");
-
-  // Probably I will have to take the digits out of this explicitly
-  if (strlen(ipaddr)
-      //      && strspn(ipaddr, "1234567890.") == strlen(ipaddr)
-      ) {
-    if (type && strcasecmp(type, "json") == 0) {
-      dump_data(ipaddr, 1);
-    } else {
-      dump_data(ipaddr, 0);
-    }
-  } else {
-    printf("Content-type: text/plain\n");
-    printf("Access-Control-Allow-Origin: *\n");
-    printf("\n");
-    printf("Bad Request");
-    printf("%s",ipaddr);
-  }
-  exit(0);
 }
