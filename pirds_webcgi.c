@@ -271,7 +271,7 @@ dump_data(char *ipaddr, int json) {
 
   char *fname = NULL;
   asprintf(&fname, "0Logfile.%s", ipaddr);
-  fprintf(stderr,"fname = %s\n",fname);
+  //  fprintf(stderr,"fname = %s\n",fname);
   FILE *fp = fopen(fname, "r");
   if (fname) free(fname);
   if (!fp) {
@@ -487,14 +487,17 @@ int main() {
   // If the form is /json/ipaddr", then we treat the type as JSON ("1") below.
   // Else we provide the raw data "0" below.
 
-
   char *path_for_uri = strdup(uri+1);
 
   // I want to process the URI without the QUERY_STRONG present.
   char** uri_tokens;
+  fprintf(stderr,"|%s|\n",path_for_uri);
   uri_tokens = str_split(path_for_uri, '?');
   char uri_only[256];
 
+  fprintf(stderr,"|%s|\n",uri_tokens[0]);
+
+  if (uri_tokens[0]) {
   strcpy(uri_only,uri_tokens[0]);
   // now we deallocate...
 
@@ -510,6 +513,9 @@ int main() {
         free(*(uri_tokens + i));
       }
   }
+  } else {
+    uri_only[0] = '\0';
+  }
 
   char** tokens;
   tokens = str_split(uri_only, '/');
@@ -519,7 +525,7 @@ int main() {
   char pen_token[256];
   ult_token[0] = '\0';
   pen_token[0] = '\0';
-  if (tokens) {
+  if (tokens[0]) {
       size_t i;
       for (i = 0; *(tokens + i); i++)
         {
@@ -528,6 +534,7 @@ int main() {
           free(*(tokens + i));
         }
       free(tokens);
+      fprintf(stderr,"ult_token|%s|\n",ult_token);
       if (strlen(ult_token)) {
         if (strlen(pen_token) && strcasecmp(ult_token, "json") == 0) {
           dump_data(pen_token, 1);
