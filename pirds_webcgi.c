@@ -5,6 +5,22 @@
          Geoff
 
  Written by Geoff Mulligan @2020
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+ Modified by Robert L. Read @2021
+ Copyright 2021 Public Invention
 ***************************************/
 
 #define _GNU_SOURCE
@@ -30,6 +46,8 @@ struct {
   char *name;
   char value[EVARSIZE];
 } evars[] = {
+  // Rob is experimenting with having an enivornment variable to set path...
+  "PIRDS_WEBCGI", "",
   "AUTH_TYPE", "",
   "CONTENT_LENGTH", "",
   "CONTENT_TYPE", "",
@@ -57,6 +75,13 @@ struct {
 };
 
 #define PATH_MAX 4096
+
+
+// Until now, we have always used the "current directory".
+// However, to have volumes work in Docker and retian files,
+// we need to be able to set this, for example to "/data".
+char *DIR_NAME = ".";
+
 
 // Queries supported:
 // json?n=XXXX -- means returns the most read XXXX samples in
@@ -89,7 +114,6 @@ static inline int file_select(const struct dirent *d)
   return (strncmp(d->d_name, "0Logfile.", 9) == 0);
 }
 
-char *DIR_NAME = ".";
 static inline int
 sortbydatetime(const struct dirent **a, const struct dirent **b)
 {
@@ -115,7 +139,6 @@ sortbydatetime(const struct dirent **a, const struct dirent **b)
 }
 
 void list_datasets_by_time() {
-  char *DIR_NAME = ".";
   char path[PATH_MAX];
 
   DIR *pdir;
@@ -165,9 +188,8 @@ void list_datasets_by_time() {
 
 void
 list_datasets() {
-  char *DIR_NAME = ".";
 
-  DIR *dir = opendir(".");
+  DIR *dir = opendir(DIR_NAME);
   if (!dir) {
     printf("Content-type: text/plain\n");
     printf("Access-Control-Allow-Origin: *\n");
@@ -270,7 +292,7 @@ dump_data(char *ipaddr, int json) {
   printf("\n");
 
   char *fname = NULL;
-  asprintf(&fname, "0Logfile.%s", ipaddr);
+  asprintf(&fname, "%s/0Logfile.%s", DIR_NAME,ipaddr);
   //  fprintf(stderr,"fname = %s\n",fname);
   FILE *fp = fopen(fname, "r");
   if (fname) free(fname);
@@ -467,6 +489,16 @@ char** str_split(char* a_str, const char a_delim)
 
 int main() {
   cgienv_parse();
+  // if the "PIRDS_WEBCGI" is set, we want to use it as DIR_NAME.
+  char *pirds_webcgi = get_envvar("PIRDS_WEBCGI");
+  if (strlen(pirds_webcgi)) {
+    // I believe this is okay because these strings are constants
+    DIR_NAME = pirds_webcgi;
+    //    fprintf(stderr,"DIR_NAME = %s\n",DIR_NAME);
+  } else {
+    //    fprintf(stderr,"PIRDS_WEBCGI not found\n");
+  }
+
 
   char *uri = get_envvar("REQUEST_URI");
 
@@ -491,11 +523,8 @@ int main() {
 
   // I want to process the URI without the QUERY_STRONG present.
   char** uri_tokens;
-  fprintf(stderr,"|%s|\n",path_for_uri);
   uri_tokens = str_split(path_for_uri, '?');
   char uri_only[256];
-
-  fprintf(stderr,"|%s|\n",uri_tokens[0]);
 
   if (uri_tokens[0]) {
   strcpy(uri_only,uri_tokens[0]);
@@ -534,7 +563,6 @@ int main() {
           free(*(tokens + i));
         }
       free(tokens);
-      fprintf(stderr,"ult_token|%s|\n",ult_token);
       if (strlen(ult_token)) {
         if (strlen(pen_token) && strcasecmp(ult_token, "json") == 0) {
           dump_data(pen_token, 1);
