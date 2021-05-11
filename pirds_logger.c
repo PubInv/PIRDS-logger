@@ -1,21 +1,39 @@
 /************************************
+MIT License
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
+Copyright (c) 2020 Public Invention
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+ This is a datalogger for the VentMon project
+ It can be started to listen for tcp connections or
+ ucp packets. The packets must be formatted in the PIRDS
+ format. The data is logged to simple unix file in the
+ current directory based on the ip address of the sender.
+ These means that there will be a collision if there are
+ multiple senders behind a single nat.
+ I'll fix this later.
+         Geoff
 
  Written by Geoff Mulligan @2020
  Modified by Robert L. Read May 2020, to use PIRDS library
- Copyright 2021 Public Invention
+
 ***************************************/
 
 /****
@@ -84,6 +102,11 @@ TCP transmission or some other approach to security.
 #include <stdbool.h>
 #include "PIRDS.h"
 
+//Serial
+#include <fcntl.h> // Contains file controls like O_RDWR
+#include <errno.h> // Error integer and strerror() function
+#include <termios.h> // Contains POSIX terminal control definitions
+#include <unistd.h> // write(), read(), close()
 
 #define SAVE_LOG_TO_FILE "SAVE_LOG_TO_FILE:"
 
@@ -125,6 +148,11 @@ struct {
 
 #define UDP 0
 #define TCP 1
+#define SERIAL 2
+
+#define SERIAL_BAUD B19200
+char read_buf [256]; //serial
+int serial_port;
 
 uint8_t gDEBUG = 1;
 
@@ -152,6 +180,10 @@ void handle_tcp_connx(int listenfd);
 int
 handle_event(uint8_t *buffer, int fd, struct sockaddr_in *clientaddr, char *peer, bool mark_minute);
 
+void setup_serial();
+void read_serial();
+void close_serial();
+
 FILE *gFOUTPUT;
 
 // We will keep a count of the number of minutes
@@ -167,7 +199,7 @@ unsigned long epoch_minute;
 // current file, which will fail if we are just beginning.
 
 int main(int argc, char* argv[]) {
-  uint8_t mode = UDP;
+  uint8_t mode = SERIAL;//UDP;
 
   int opt;
   while ((opt = getopt(argc, argv, "Dt")) != -1) {
@@ -229,13 +261,23 @@ int main(int argc, char* argv[]) {
   }
   if (gDEBUG)
     fprintf(gFOUTPUT, "LOOP!\n");
+    
+  if (mode == SERIAL) {
+    gFOUTPUT = fopen("fileopen", "w");
+    setup_serial();
+  }
 
   while (1) {
     if (mode == TCP)
       handle_tcp_connx(listenfd);
-    else
+    else if (mode == UDP)
       handle_udp_connx(listenfd);
+    else
+      read_serial();
   }
+  
+  if (mode == SERIAL)
+    close_serial();
 }
 
 void
@@ -878,8 +920,8 @@ void handle_udp_connx(int listenfd) {
 
   if (gDEBUG) {
     fprintf(gFOUTPUT, "(%s) ", peer);
-    fprintf(gFOUTPUT, "len: [%d]\n", len);
-    //    fprintf(gFOUTPUT, "(%s)\n", buffer);
+    fprintf(gFOUTPUT, "len: [%d]\n", len);    
+    //    fprintf(gFOUTPUT, "(%s)\n", buffer);    
   }
   //    This is a bit of a problem---we support both bytes and
   //      JSON, but have no truly excellent way of deciding which!
@@ -1033,4 +1075,75 @@ void handle_tcp_connx(int listenfd) {
 
     }
   }
+}
+
+void setup_serial(){
+  // Open the serial port.
+  serial_port = open("/dev/ttyACM0", O_RDWR);
+
+  // Create new termios struc, we call it 'tty' for convention
+  struct termios tty;
+
+  // Read in existing settings, and handle any error
+  if(tcgetattr(serial_port, &tty) != 0) {
+      printf("Error %i from tcgetattr: %s\n", errno, strerror(errno));
+      return;
+  }
+
+  tty.c_cflag &= ~PARENB; // Clear parity bit, disabling parity (most common)
+  tty.c_cflag &= ~CSTOPB; // Clear stop field, only one stop bit used in communication (most common)
+  tty.c_cflag &= ~CSIZE; // Clear all bits that set the data size 
+  tty.c_cflag |= CS8; // 8 bits per byte (most common)
+  tty.c_cflag &= ~CRTSCTS; // Disable RTS/CTS hardware flow control (most common)
+  tty.c_cflag |= CREAD | CLOCAL; // Turn on READ & ignore ctrl lines (CLOCAL = 1)
+
+  tty.c_lflag &= ~ICANON;
+  tty.c_lflag &= ~ECHO; // Disable echo
+  tty.c_lflag &= ~ECHOE; // Disable erasure
+  tty.c_lflag &= ~ECHONL; // Disable new-line echo
+  tty.c_lflag &= ~ISIG; // Disable interpretation of INTR, QUIT and SUSP
+  tty.c_iflag &= ~(IXON | IXOFF | IXANY); // Turn off s/w flow ctrl
+  tty.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL); // Disable any special handling of received bytes
+
+  tty.c_oflag &= ~OPOST; // Prevent special interpretation of output bytes (e.g. newline chars)
+  tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
+  // tty.c_oflag &= ~OXTABS; // Prevent conversion of tabs to spaces (NOT PRESENT ON LINUX)
+  // tty.c_oflag &= ~ONOEOT; // Prevent removal of C-d chars (0x004) in output (NOT PRESENT ON LINUX)
+
+  tty.c_cc[VTIME] = 0;    // Wait for up to 1s (10 deciseconds), returning as soon as any data is received.
+  tty.c_cc[VMIN] = 0;
+
+  // Set in/out baud rate
+  cfsetispeed(&tty, SERIAL_BAUD);
+  cfsetospeed(&tty, SERIAL_BAUD);
+
+  // Save tty settings, also checking for error
+  if (tcsetattr(serial_port, TCSANOW, &tty) != 0) {
+      printf("Error %i from tcsetattr: %s\n", errno, strerror(errno));
+      return;
+  }
+
+  memset(&read_buf, '\0', sizeof(read_buf));
+}
+
+void read_serial(){
+    char chr;
+    int num_bytes;
+    do {
+        num_bytes = read(serial_port, &chr, 1);
+        if (num_bytes < 0) {
+            printf("Error reading: %s", strerror(errno));
+            break;
+        }
+        if (num_bytes == 1) {
+            printf("%c", chr);
+            fprintf(gFOUTPUT, "%c", chr);
+        }
+    }
+    while (num_bytes);
+}
+
+void close_serial(){
+  fclose(gFOUTPUT);
+  close(serial_port);
 }
