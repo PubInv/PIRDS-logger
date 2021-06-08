@@ -83,7 +83,7 @@ typedef struct Message
 
 // A Clock Event has the same structure as a Message Event,
 // but the character buffer is not random but and ISO-8601 time string
-// with precision of seconds. It usese 'C' as its type.
+// with precision of seconds. It uses 'C' as its type.
 
 
 #define FLOW_TOO_HIGH "FLOW OUT OF RANGE HIGH"
