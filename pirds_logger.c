@@ -33,7 +33,7 @@ which has the real UTC time (known on POSIX systems.) At this
 time we record the ms time of the event that we receive. Call this
 the "high water mark ms".
 
-For the next 10 seconds, we sutract that ms time from the incoming stream
+For the next 10 seconds, we subtract that ms time from the incoming stream
 to get a quasi-accurate real UTC time for each sample. We record this
 time in UNIX EPOCH milliseconds (NOT SECONDS). Yes, I know it will
 fail in 2038. The time stream is thus a correct wave form relative to
