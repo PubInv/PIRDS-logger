@@ -82,6 +82,8 @@ struct {
 // we need to be able to set this, for example to "/data".
 char *DIR_NAME = ".";
 
+char *scriptname;
+
 
 // Queries supported:
 // json?n=XXXX -- means returns the most read XXXX samples in
@@ -177,9 +179,12 @@ void list_datasets_by_time() {
         strftime(strtime, sizeof(strtime), "%H:%M:%S", &lt);
         memset(strdate, 0, sizeof(strdate));
         strftime(strdate, sizeof(strdate), "%F", &lt);
-        char *scriptname = get_envvar("SCRIPT_NAME");
-        printf("%s -- <a href=%s%s>raw</a> / <a href=%s%s/json>json</a> / <a href=%sbreath_plot?i=%s>Breath Plot</a><br>",
-               pdirent[n]->d_name+9, scriptname, pdirent[n]->d_name+9, scriptname, pdirent[n]->d_name+9, scriptname, pdirent[n]->d_name+9);
+        fprintf(stderr,"scriptname = |%s|\n",scriptname);
+        fprintf(stderr,"pdirent[n] = |%s|\n",pdirent[n]->d_name+9);
+        fprintf(stderr,"%s --  <a href=%s/rds/%s/json>json</a> / <a href=%s/breath_plot?i=%s>Breath Plot</a><br>",
+               pdirent[n]->d_name+9,  scriptname, pdirent[n]->d_name+9, scriptname, pdirent[n]->d_name+9);
+        printf("%s --  <a href=/rds/%s/json>json</a> / <a href=breath_plot?i=%s>Breath Plot</a><br>",
+               pdirent[n]->d_name+9,  pdirent[n]->d_name+9, pdirent[n]->d_name+9);
       }
     free(pdirent[n]);
   }
@@ -489,6 +494,13 @@ char** str_split(char* a_str, const char a_delim)
 
 int main() {
   cgienv_parse();
+
+  // The script_name in fact is of the form "*/rds" --- and we only want the first part.
+  scriptname = get_envvar("SCRIPT_NAME");
+  scriptname = get_envvar("SERVER_NAME");
+
+  fprintf(stderr,"scriptname = %s\n",scriptname);
+
   // if the "PIRDS_WEBCGI" is set, we want to use it as DIR_NAME.
   char *pirds_webcgi = get_envvar("PIRDS_WEBCGI");
   if (strlen(pirds_webcgi)) {
@@ -498,7 +510,6 @@ int main() {
   } else {
     //    fprintf(stderr,"PIRDS_WEBCGI not found\n");
   }
-
 
   char *uri = get_envvar("REQUEST_URI");
 
@@ -521,7 +532,7 @@ int main() {
 
   char *path_for_uri = strdup(uri+1);
 
-  // I want to process the URI without the QUERY_STRONG present.
+  // I want to process the URI without the QUERY_STRING present.
   char** uri_tokens;
   uri_tokens = str_split(path_for_uri, '?');
   char uri_only[256];
@@ -549,20 +560,34 @@ int main() {
   char** tokens;
   tokens = str_split(uri_only, '/');
 
+  /* for debugging... */
+  {
+      int i;
+      for(i = 0; tokens[i]; i++) {
+        fprintf(stderr,"tokens %d %s\n",i,tokens[i]);
+      }
+  }
+
+  // NOTE: In August we switched from using no name like (localhost/) to using "rds"
+  // like: localhost/rds. this means that the first token is "rds", and therefore
+  // not counted below. The second token, if it exists, is the type ("raw" or "json")
+  //
+
   // we need only the last token and (posibly) the penultimate token;
   char ult_token[256];
   char pen_token[256];
   ult_token[0] = '\0';
   pen_token[0] = '\0';
-  if (tokens[0]) {
+  if (tokens[1]) {
       size_t i;
-      for (i = 0; *(tokens + i); i++)
+      for (i = 1; *(tokens + i); i++)
         {
           strcpy(pen_token,ult_token);
           strcpy(ult_token,*(tokens + i));
           free(*(tokens + i));
         }
       free(tokens);
+      fprintf(stderr,"pen_token ult_token |%s| |%s|\n",pen_token, ult_token);
       if (strlen(ult_token)) {
         if (strlen(pen_token) && strcasecmp(ult_token, "json") == 0) {
           dump_data(pen_token, 1);
