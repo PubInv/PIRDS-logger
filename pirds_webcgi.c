@@ -179,11 +179,11 @@ void list_datasets_by_time() {
         strftime(strtime, sizeof(strtime), "%H:%M:%S", &lt);
         memset(strdate, 0, sizeof(strdate));
         strftime(strdate, sizeof(strdate), "%F", &lt);
-        fprintf(stderr,"scriptname = |%s|\n",scriptname);
-        fprintf(stderr,"pdirent[n] = |%s|\n",pdirent[n]->d_name+9);
-        fprintf(stderr,"%s --  <a href=%s/rds/%s/json>json</a> / <a href=%s/breath_plot?i=%s>Breath Plot</a><br>",
-               pdirent[n]->d_name+9,  scriptname, pdirent[n]->d_name+9, scriptname, pdirent[n]->d_name+9);
-        printf("%s --  <a href=/rds/%s/json>json</a> / <a href=breath_plot?i=%s>Breath Plot</a><br>",
+        /* fprintf(stderr,"scriptname = |%s|\n",scriptname); */
+        /* fprintf(stderr,"pdirent[n] = |%s|\n",pdirent[n]->d_name+9); */
+        /* fprintf(stderr,"%s --  <a href=%s/rds/%s/json>json</a> / <a href=%s/breath_plot?i=%s>Breath Plot</a><br>", */
+        /*        pdirent[n]->d_name+9,  scriptname, pdirent[n]->d_name+9, scriptname, pdirent[n]->d_name+9); */
+        printf("%s --  <a href=/rds/%s/json>json?n=200</a> / <a href=breath_plot?i=%s>Breath Plot</a><br>",
                pdirent[n]->d_name+9,  pdirent[n]->d_name+9, pdirent[n]->d_name+9);
       }
     free(pdirent[n]);
@@ -499,7 +499,7 @@ int main() {
   scriptname = get_envvar("SCRIPT_NAME");
   scriptname = get_envvar("SERVER_NAME");
 
-  fprintf(stderr,"scriptname = %s\n",scriptname);
+  //  fprintf(stderr,"scriptname = %s\n",scriptname);
 
   // if the "PIRDS_WEBCGI" is set, we want to use it as DIR_NAME.
   char *pirds_webcgi = get_envvar("PIRDS_WEBCGI");
@@ -561,12 +561,12 @@ int main() {
   tokens = str_split(uri_only, '/');
 
   /* for debugging... */
-  {
-      int i;
-      for(i = 0; tokens[i]; i++) {
-        fprintf(stderr,"tokens %d %s\n",i,tokens[i]);
-      }
-  }
+  /* { */
+  /*     int i; */
+  /*     for(i = 0; tokens[i]; i++) { */
+  /*       fprintf(stderr,"tokens %d %s\n",i,tokens[i]); */
+  /*     } */
+  /* } */
 
   // NOTE: In August we switched from using no name like (localhost/) to using "rds"
   // like: localhost/rds. this means that the first token is "rds", and therefore
@@ -587,7 +587,6 @@ int main() {
           free(*(tokens + i));
         }
       free(tokens);
-      fprintf(stderr,"pen_token ult_token |%s| |%s|\n",pen_token, ult_token);
       if (strlen(ult_token)) {
         if (strlen(pen_token) && strcasecmp(ult_token, "json") == 0) {
           dump_data(pen_token, 1);
